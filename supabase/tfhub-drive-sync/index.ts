@@ -15,7 +15,7 @@ const CONFIGS: Config[] = [
   {file:"planos.csv",table:"planos",key:"plano_id",columns:["plano_id","nome","servico_id","ativo"],numbers:["plano_id","servico_id"],booleans:["ativo"]},
   {file:"contratos.csv",table:"contratos",key:"contrato_id",columns:["contrato_id","valor_contrato","valor_implantacao","fee_mensal","data_assinatura","data_contrato","data_fim_contrato","ativo","cliente_id","investidor_id","renovavel","meses","valor_bookado","qtd_parcelas","valor_parcela","tipo","squad_id"],numbers:["contrato_id","valor_contrato","valor_implantacao","fee_mensal","cliente_id","investidor_id","meses","valor_bookado","qtd_parcelas","valor_parcela","squad_id"],booleans:["ativo","renovavel"]},
   {file:"cliente_equipe.csv",table:"cliente_equipe",key:"equipe_id",columns:["equipe_id","cliente_id","investidor_id","servico_id"],numbers:["equipe_id","cliente_id","investidor_id","servico_id"]},
-  {file:"contrato_planos.csv",table:"contratos_planos",key:"contrato_plano_id",columns:["contrato_plano_id","contrato_id","plano_id"],numbers:["contrato_plano_id","contrato_id","plano_id"]},
+  {file:"contrato_planos.csv",table:"contrato_planos",key:"contrato_plano_id",columns:["contrato_plano_id","contrato_id","plano_id"],numbers:["contrato_plano_id","contrato_id","plano_id"]},
 ];
 const json=(body:unknown,status=200)=>new Response(JSON.stringify(body),{status,headers:{"content-type":"application/json; charset=utf-8","cache-control":"private, no-store","x-content-type-options":"nosniff"}});
 async function sha256(value:string){const digest=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(value));return[...new Uint8Array(digest)].map(b=>b.toString(16).padStart(2,"0")).join("")}

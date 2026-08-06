@@ -39,9 +39,21 @@ function recurringValue(contract: Record<string, unknown>) {
     bookedValue !== undefined &&
     String(bookedValue).trim() !== "";
 
+  if (hasBookedValue && months === 0) return 0;
   return hasBookedValue && months > 0
     ? number(bookedValue) / months
     : number(contract.fee_mensal);
+}
+
+function oneShotValue(contract: Record<string, unknown>) {
+  const bookedValue = contract.valor_bookado;
+  const months = number(contract.meses);
+  const hasBookedValue =
+    bookedValue !== null &&
+    bookedValue !== undefined &&
+    String(bookedValue).trim() !== "";
+
+  return hasBookedValue && months === 0 ? number(bookedValue) : 0;
 }
 
 function date(value: unknown): Date | null {
@@ -52,6 +64,23 @@ function date(value: unknown): Date | null {
     ? new Date(Date.UTC(Number(br[3]), Number(br[2]) - 1, Number(br[1])))
     : new Date(text);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function isActiveContract(
+  contract: Record<string, unknown>,
+  referenceDate = new Date(),
+) {
+  if (!contract.ativo) return false;
+  const rawEndDate = String(contract.data_fim_contrato ?? "").trim();
+  if (!rawEndDate) return true;
+  const endDate = date(rawEndDate);
+  if (!endDate) return false;
+  const today = Date.UTC(
+    referenceDate.getUTCFullYear(),
+    referenceDate.getUTCMonth(),
+    referenceDate.getUTCDate(),
+  );
+  return endDate.getTime() >= today;
 }
 
 function monthKey(value: unknown) {
@@ -96,6 +125,10 @@ Deno.serve(async (request) => {
     db.from("funcoes").select("funcao_id,nome,ativo"),
     db.from("servicos").select("servico_id,nome,ativo"),
     db.from("segmentos").select("segmento_id,nome"),
+    db.from("planos").select("plano_id,servico_id,ativo"),
+    db.from("contrato_planos").select("contrato_id,plano_id"),
+    db.from("contrato_equipe").select("contrato_equipe_id,contrato_id,investidor_id,servico_id"),
+    db.from("meta_demandas").select("*"),
   ]);
 
   const failed = queries.find((query) => query.error);
@@ -104,7 +137,7 @@ Deno.serve(async (request) => {
     return json({ error: "Não foi possível consultar os dados atuais" }, 500);
   }
 
-  const [clientes, contratos, squads, investidores, equipe, funcoes, servicos, segmentos] =
+  const [clientes, contratos, squads, investidores, equipe, funcoes, servicos, segmentos, planos, contratoPlanos, contratoEquipe, metaDemandas] =
     queries.map((query) => query.data ?? []);
 
   const squadById = new Map(squads.map((row) => [String(row.squad_id), row.nome]));
@@ -122,7 +155,9 @@ Deno.serve(async (request) => {
 
   const clients = clientes.map((client) => {
     const clientContracts = contractsByClient.get(String(client.cliente_id)) ?? [];
-    const activeContracts = clientContracts.filter((contract) => contract.ativo);
+    const activeContracts = clientContracts.filter((contract) =>
+      isActiveContract(contract)
+    );
     const mrr = activeContracts.reduce((sum, contract) => sum + recurringValue(contract), 0);
     const ltv = clientContracts.reduce(
       (sum, contract) => sum + number(contract.valor_contrato) + number(contract.fee_mensal) * number(contract.meses),
@@ -158,7 +193,7 @@ Deno.serve(async (request) => {
       churned,
       churn: squadClients.length ? (churned / squadClients.length) * 100 : 0,
       gmv: squadClients.filter((client) => client.ativo).reduce((sum, client) => sum + number(client.gmv), 0),
-      mrr: squadContracts.filter((contract) => contract.ativo).reduce((sum, contract) => sum + recurringValue(contract), 0),
+      mrr: squadContracts.filter((contract) => isActiveContract(contract)).reduce((sum, contract) => sum + recurringValue(contract), 0),
       ltv: squadContracts.reduce(
         (sum, contract) => sum + number(contract.valor_contrato) + number(contract.fee_mensal) * number(contract.meses),
         0,
@@ -220,32 +255,191 @@ Deno.serve(async (request) => {
       squad: squadById.get(String(investor.squad_id)) || "Indefinido",
       ativos: ownerClients.filter((client) => client.ativo).length,
       churned: ownerClients.filter((client) => !client.ativo).length,
-      mrr: ownerContracts.filter((contract) => contract.ativo).reduce((sum, contract) => sum + recurringValue(contract), 0),
+      mrr: ownerContracts.filter((contract) => isActiveContract(contract)).reduce((sum, contract) => sum + recurringValue(contract), 0),
       renovacao: ownerContracts.length ? Number(((renewable.length / ownerContracts.length) * 100).toFixed(1)) : 0,
     };
   }).filter((owner) => owner.ativos || owner.churned || owner.mrr)
     .sort((a, b) => b.mrr - a.mrr);
 
-  const activeFeeByClient = new Map<string, number>();
-  for (const contract of contratos.filter((contract) => contract.ativo)) {
-    const key = String(contract.cliente_id);
-    activeFeeByClient.set(key, (activeFeeByClient.get(key) ?? 0) + recurringValue(contract));
+  const contractById = new Map(
+    contratos.map((contract) => [String(contract.contrato_id), contract]),
+  );
+  const financialsByClientInvestorService = new Map<
+    string,
+    { recurring: number; oneShot: number }
+  >();
+  const assignedContractIds = new Set(
+    contratoEquipe.map((assignment) => String(assignment.contrato_id)),
+  );
+  const seenAssignments = new Set<string>();
+  for (const assignment of contratoEquipe) {
+    const contract = contractById.get(String(assignment.contrato_id));
+    if (!contract || !isActiveContract(contract)) continue;
+    const keyParts = [
+      String(contract.cliente_id),
+      String(assignment.investidor_id),
+      String(assignment.servico_id),
+    ];
+    const assignmentKey = [String(contract.contrato_id), ...keyParts].join(":");
+    if (seenAssignments.has(assignmentKey)) continue;
+    seenAssignments.add(assignmentKey);
+    const key = keyParts.join(":");
+    const financials = financialsByClientInvestorService.get(key) ?? {
+      recurring: 0,
+      oneShot: 0,
+    };
+    financials.recurring += recurringValue(contract);
+    financials.oneShot += oneShotValue(contract);
+    financialsByClientInvestorService.set(key, financials);
+  }
+
+  const serviceIdByPlanId = new Map(
+    planos.map((plan) => [String(plan.plano_id), String(plan.servico_id)]),
+  );
+  const serviceIdsByContractId = new Map<string, Set<string>>();
+  for (const link of contratoPlanos) {
+    const serviceId = serviceIdByPlanId.get(String(link.plano_id));
+    if (!serviceId) continue;
+    const contractId = String(link.contrato_id);
+    if (!serviceIdsByContractId.has(contractId)) {
+      serviceIdsByContractId.set(contractId, new Set());
+    }
+    serviceIdsByContractId.get(contractId)!.add(serviceId);
+  }
+  for (const assignment of contratoEquipe) {
+    const contractId = String(assignment.contrato_id);
+    if (!serviceIdsByContractId.has(contractId)) {
+      serviceIdsByContractId.set(contractId, new Set());
+    }
+    serviceIdsByContractId.get(contractId)!.add(String(assignment.servico_id));
+  }
+
+  const serviceMetricsById = new Map<
+    string,
+    {
+      recurring: number;
+      oneShot: number;
+      recurringContracts: number;
+      oneShotContracts: number;
+      activeContracts: number;
+    }
+  >();
+  for (const contract of contratos) {
+    if (!isActiveContract(contract)) continue;
+    const serviceIds = serviceIdsByContractId.get(String(contract.contrato_id));
+    if (!serviceIds) continue;
+    const recurring = recurringValue(contract);
+    const oneShot = oneShotValue(contract);
+    for (const serviceId of serviceIds) {
+      const metrics = serviceMetricsById.get(serviceId) ?? {
+        recurring: 0,
+        oneShot: 0,
+        recurringContracts: 0,
+        oneShotContracts: 0,
+        activeContracts: 0,
+      };
+      metrics.recurring += recurring;
+      metrics.oneShot += oneShot;
+      metrics.activeContracts += 1;
+      if (recurring > 0) metrics.recurringContracts += 1;
+      if (oneShot > 0) metrics.oneShotContracts += 1;
+      serviceMetricsById.set(serviceId, metrics);
+    }
+  }
+  const services = servicos
+    .flatMap((service) => {
+      const metrics = serviceMetricsById.get(String(service.servico_id));
+      if (!metrics) return [];
+      return [{
+        id: service.servico_id,
+        nome: service.nome || "Serviço sem nome",
+        ...metrics,
+        recurringTicket: metrics.recurringContracts
+          ? metrics.recurring / metrics.recurringContracts
+          : 0,
+        oneShotTicket: metrics.oneShotContracts
+          ? metrics.oneShot / metrics.oneShotContracts
+          : 0,
+      }];
+    })
+    .sort(
+      (a, b) =>
+        b.recurring + b.oneShot - (a.recurring + a.oneShot) ||
+        String(a.nome).localeCompare(String(b.nome), "pt-BR"),
+    );
+  const inferredFinancialsByClientService = new Map<
+    string,
+    { recurring: number; oneShot: number }
+  >();
+  for (const contract of contratos) {
+    const contractId = String(contract.contrato_id);
+    if (!isActiveContract(contract) || assignedContractIds.has(contractId)) {
+      continue;
+    }
+    const serviceIds = serviceIdsByContractId.get(contractId);
+    if (!serviceIds) continue;
+    for (const serviceId of serviceIds) {
+      const key = `${String(contract.cliente_id)}:${serviceId}`;
+      const financials = inferredFinancialsByClientService.get(key) ?? {
+        recurring: 0,
+        oneShot: 0,
+      };
+      financials.recurring += recurringValue(contract);
+      financials.oneShot += oneShotValue(contract);
+      inferredFinancialsByClientService.set(key, financials);
+    }
   }
   const clientById = new Map(clientes.map((row) => [String(row.cliente_id), row]));
   const teamRows = equipe.flatMap((link) => {
     const client = clientById.get(String(link.cliente_id));
     const investor = investorById.get(String(link.investidor_id));
     if (!client || !investor) return [];
+    const assignedFinancials = financialsByClientInvestorService.get(
+      [
+        String(link.cliente_id),
+        String(link.investidor_id),
+        String(link.servico_id),
+      ].join(":"),
+    );
+    const inferredFinancials = inferredFinancialsByClientService.get(
+      `${String(link.cliente_id)}:${String(link.servico_id)}`,
+    );
+    if (!assignedFinancials && !inferredFinancials) return [];
     return [[
       functionById.get(String(investor?.funcao_id)) || "Função não definida",
       investor?.nome || "Sem responsável",
       squadById.get(String(investor?.squad_id)) || "Indefinido",
       client.nome || "Cliente sem nome",
       serviceById.get(String(link.servico_id)) || "Serviço não definido",
-      activeFeeByClient.get(String(link.cliente_id)) ?? 0,
+      (assignedFinancials?.recurring ?? 0) +
+        (inferredFinancials?.recurring ?? 0),
+      (assignedFinancials?.oneShot ?? 0) +
+        (inferredFinancials?.oneShot ?? 0),
       Boolean(client.ativo),
       Boolean(investor.ativo),
     ]];
+  });
+  const demandGoals = metaDemandas.map((row) => {
+    const client = clientById.get(String(row.cliente_id));
+    const assignedInvestors = [row.account_id, row.gestor_trafego_id, row.designer_id]
+      .filter((id) => id !== null && id !== undefined)
+      .map((id) => investorById.get(String(id)))
+      .filter(Boolean);
+    const investorName = (id: unknown) => investorById.get(String(id))?.nome || "Não definido";
+    return {
+      id: row.meta_demanda_id,
+      cliente: client?.nome || "Cliente não definido",
+      clienteAtivo: Boolean(client?.ativo),
+      squad: squadById.get(String(row.squad_id)) || "Indefinido",
+      account: investorName(row.account_id),
+      gestorTrafego: investorName(row.gestor_trafego_id),
+      designer: investorName(row.designer_id),
+      investidorAtivo: assignedInvestors.length > 0 && assignedInvestors.every((investor) => Boolean(investor?.ativo)),
+      ano: number(row.ano), semana: number(row.semana), mes: number(row.mes),
+      meta: number(row.meta_demanda), resultado: number(row.resultado_semanal),
+      bateuMeta: Boolean(row.bateu_meta), checkinRealizado: Boolean(row.checkin_realizado),
+      objetivo: row.objetivo_projeto || "—",
+    };
   });
 
   return json({
@@ -256,5 +450,7 @@ Deno.serve(async (request) => {
     owners,
     clients,
     teamRows,
+    services,
+    demandGoals,
   });
 });

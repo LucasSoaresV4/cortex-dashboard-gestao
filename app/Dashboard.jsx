@@ -3,16 +3,17 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Line, LineChart,
-  ResponsiveContainer, Tooltip, XAxis, YAxis
+  ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis
 } from "recharts";
 import {
   AlertTriangle, ArrowDownRight, ArrowUpRight, BriefcaseBusiness, ChevronLeft,
   ChevronRight, CircleDollarSign, Download, Filter, LayoutDashboard, Search,
-  ShieldCheck, TrendingUp, UserRoundCog, Users, X
+  ShieldCheck, Target, TrendingUp, UserRoundCog, Users, X
 } from "lucide-react";
 import snapshotTeamRows from "./team-data";
 
 const RED = "#ef233c";
+const GOAL_DIMENSIONS={squad:["Squad","squad"],account:["Account","account"],gestorTrafego:["Gestor de tráfego","gestorTrafego"],designer:["Designer","designer"],semana:["Semana","semana"],mes:["Mês","mes"]};
 const snapshotSquads = [
   {id:10,nome:"S.W.A.T",ativos:29,churned:18,churn:38.3,gmv:1701611000,mrr:204746.91,ltv:264130.91},
   {id:11,nome:"GrowthHunters",ativos:95,churned:96,churn:50.3,gmv:70540005,mrr:174629,ltv:174629},
@@ -78,7 +79,11 @@ const snapshotClients = [
 const money = v => new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL",maximumFractionDigits:0}).format(v||0);
 const compact = v => new Intl.NumberFormat("pt-BR",{notation:"compact",maximumFractionDigits:1}).format(v||0);
 const monthLabel = m => new Date(`${m}-02T12:00:00`).toLocaleDateString("pt-BR",{month:"short",year:"2-digit"});
-const chartTip = {contentStyle:{background:"#15171c",border:"1px solid #30343b",borderRadius:12,color:"#fff",fontSize:12}};
+const chartTip = {
+  contentStyle:{background:"#15171c",border:"1px solid #30343b",borderRadius:12,color:"#f3f4f6",fontSize:12},
+  labelStyle:{color:"#f3f4f6",fontWeight:700},
+  itemStyle:{color:"#f3f4f6"},
+};
 
 function Kpi({label,value,detail,icon:Icon,tone="neutral"}) {
   return <article className={`kpi ${tone}`}><div className="kpi-top"><span>{label}</span><Icon size={17}/></div><strong>{value}</strong><small>{detail}</small></article>;
@@ -99,6 +104,20 @@ export default function Dashboard(){
   const [teamSquad,setTeamSquad]=useState("Todos");
   const [teamClientStatus,setTeamClientStatus]=useState("Ativos");
   const [teamInvestorStatus,setTeamInvestorStatus]=useState("Ativos");
+  const [serviceSearch,setServiceSearch]=useState("");
+  const [squadDetail,setSquadDetail]=useState("Todos");
+  const [squadClientSearch,setSquadClientSearch]=useState("");
+  const [squadClientStatus,setSquadClientStatus]=useState("Todos");
+  const [squadPage,setSquadPage]=useState(1);
+  const [goalView,setGoalView]=useState("squad");
+  const [goalClientStatus,setGoalClientStatus]=useState("Todos");
+  const [goalInvestorStatus,setGoalInvestorStatus]=useState("Todos");
+  const [goalWeek,setGoalWeek]=useState("Todos");
+  const [goalMonth,setGoalMonth]=useState("Todos");
+  const [goalHit,setGoalHit]=useState("Todos");
+  const [goalCheckin,setGoalCheckin]=useState("Todos");
+  const [goalPage,setGoalPage]=useState(1);
+  const [goalEvolutionPeriod,setGoalEvolutionPeriod]=useState("Semana");
   const pageSize=8;
   const squads=liveData?.squads||snapshotSquads;
   const monthly=liveData?.monthly||snapshotMonthly;
@@ -106,6 +125,8 @@ export default function Dashboard(){
   const owners=liveData?.owners||snapshotOwners;
   const clients=liveData?.clients||snapshotClients;
   const teamRows=liveData?.teamRows||snapshotTeamRows;
+  const services=useMemo(()=>liveData?.services||[],[liveData?.services]);
+  const demandGoals=useMemo(()=>liveData?.demandGoals||[],[liveData?.demandGoals]);
   const extractedAt=liveData?.extractedAt;
   useEffect(()=>{
     let active=true;
@@ -176,6 +197,68 @@ export default function Dashboard(){
   const uniqueTeamClients=new Set(visibleTeam.map(r=>r.cliente)).size;
   const totalTeamFee=visibleTeam.reduce((sum,r)=>sum+r.fee,0);
   const totalTeamOneShot=visibleTeam.reduce((sum,r)=>sum+r.oneshot,0);
+  const visibleServices=useMemo(()=>services.filter(service=>
+    String(service.nome).toLowerCase().includes(serviceSearch.toLowerCase())
+  ),[services,serviceSearch]);
+  const totalServiceRecurring=services.reduce((sum,service)=>sum+service.recurring,0);
+  const totalServiceOneShot=services.reduce((sum,service)=>sum+service.oneShot,0);
+  const recurringServiceContracts=services.reduce((sum,service)=>sum+service.recurringContracts,0);
+  const oneShotServiceContracts=services.reduce((sum,service)=>sum+service.oneShotContracts,0);
+  const averageServiceRecurring=recurringServiceContracts?totalServiceRecurring/recurringServiceContracts:0;
+  const averageServiceOneShot=oneShotServiceContracts?totalServiceOneShot/oneShotServiceContracts:0;
+  const squadRows=useMemo(()=>{
+    const grouped=new Map();
+    clients.forEach(client=>{
+      const name=client.squad||"Indefinido";
+      if(!grouped.has(name)) grouped.set(name,{id:name,nome:name,ativos:0,churned:0,mrr:0,oneshot:0,ltv:0});
+      const item=grouped.get(name);
+      if(client.ativo)item.ativos+=1;else item.churned+=1;
+      item.mrr+=client.mrr||0;
+      item.oneshot+=client.oneshot||0;
+      item.ltv+=client.ltv||0;
+    });
+    return [...grouped.values()].map(item=>({...item,churn:item.ativos+item.churned?Number(((item.churned/(item.ativos+item.churned))*100).toFixed(1)):0})).sort((a,b)=>b.ativos+b.churned-(a.ativos+a.churned));
+  },[clients]);
+  const squadChartData=squadRows.slice(0,12);
+  const filteredSquadClients=useMemo(()=>clients.filter(client=>
+    (squadDetail==="Todos"||client.squad===squadDetail)&&
+    (squadClientStatus==="Todos"||(squadClientStatus==="Ativos"?client.ativo:!client.ativo))&&
+    `${client.nome} ${client.responsavel}`.toLowerCase().includes(squadClientSearch.toLowerCase())
+  ),[clients,squadDetail,squadClientStatus,squadClientSearch]);
+  const squadPageSize=12;
+  const squadPages=Math.max(1,Math.ceil(filteredSquadClients.length/squadPageSize));
+  const visibleSquadPage=Math.min(squadPage,squadPages);
+  const squadClientRows=filteredSquadClients.slice((visibleSquadPage-1)*squadPageSize,visibleSquadPage*squadPageSize);
+  const totalSquadActive=squadRows.reduce((sum,item)=>sum+item.ativos,0);
+  const totalSquadChurn=squadRows.reduce((sum,item)=>sum+item.churned,0);
+  const totalSquadMrr=squadRows.reduce((sum,item)=>sum+item.mrr,0);
+  const goalWeeks=useMemo(()=>[...new Set(demandGoals.map(row=>`${row.ano}-${String(row.mes).padStart(2,"0")}-S${String(row.semana).padStart(2,"0")}`))].sort().reverse(),[demandGoals]);
+  const goalMonths=useMemo(()=>[...new Set(demandGoals.map(row=>`${row.ano}-${String(row.mes).padStart(2,"0")}`))].sort().reverse(),[demandGoals]);
+  const filteredGoals=useMemo(()=>demandGoals.filter(row=>
+    (goalClientStatus==="Todos"||(goalClientStatus==="Ativos"?row.clienteAtivo:!row.clienteAtivo))&&
+    (goalInvestorStatus==="Todos"||(goalInvestorStatus==="Ativos"?row.investidorAtivo:!row.investidorAtivo))&&
+    (goalWeek==="Todos"||`${row.ano}-${String(row.mes).padStart(2,"0")}-S${String(row.semana).padStart(2,"0")}`===goalWeek)&&
+    (goalMonth==="Todos"||`${row.ano}-${String(row.mes).padStart(2,"0")}`===goalMonth)&&
+    (goalHit==="Todos"||(goalHit==="Sim"?row.bateuMeta:!row.bateuMeta))&&
+    (goalCheckin==="Todos"||(goalCheckin==="Sim"?row.checkinRealizado:!row.checkinRealizado))
+  ),[demandGoals,goalClientStatus,goalInvestorStatus,goalWeek,goalMonth,goalHit,goalCheckin]);
+  const goalGrouped=useMemo(()=>{
+    const field=GOAL_DIMENSIONS[goalView][1];const map=new Map();
+    filteredGoals.forEach(row=>{const raw=row[field];const label=field==="semana"?`S${String(raw).padStart(2,"0")} · ${monthLabel(`${row.ano}-${String(row.mes).padStart(2,"0")}`)}`:field==="mes"?new Date(row.ano,Number(raw)-1,1).toLocaleDateString("pt-BR",{month:"short",year:"numeric"}):raw||"Não definido";const item=map.get(label)||{nome:label,meta:0,resultado:0,registros:0,atingidas:0};item.meta+=row.meta;item.resultado+=row.resultado;item.registros+=1;if(row.bateuMeta)item.atingidas+=1;map.set(label,item)});
+    return [...map.values()].map(item=>({...item,atingimento:item.registros?Number((item.atingidas/item.registros*100).toFixed(1)):0})).sort((a,b)=>b.atingimento-a.atingimento||b.registros-a.registros).slice(0,15);
+  },[filteredGoals,goalView]);
+  const totalGoal=filteredGoals.reduce((sum,row)=>sum+row.meta,0);
+  const totalGoalResult=filteredGoals.reduce((sum,row)=>sum+row.resultado,0);
+  const goalsHit=filteredGoals.filter(row=>row.bateuMeta).length;
+  const goalsChecked=filteredGoals.filter(row=>row.checkinRealizado).length;
+  const goalPages=Math.max(1,Math.ceil(filteredGoals.length/20));
+  const visibleGoalPage=Math.min(goalPage,goalPages);
+  const goalRows=filteredGoals.slice((visibleGoalPage-1)*20,visibleGoalPage*20);
+  const goalEvolution=useMemo(()=>{
+    const map=new Map();
+    filteredGoals.forEach(row=>{const month=`${row.ano}-${String(row.mes).padStart(2,"0")}`;const key=goalEvolutionPeriod==="Semana"?`${month}-S${String(row.semana).padStart(2,"0")}`:month;const item=map.get(key)||{key,atingidas:0,registros:0};item.registros+=1;if(row.bateuMeta)item.atingidas+=1;map.set(key,item)});
+    return [...map.values()].sort((a,b)=>a.key.localeCompare(b.key)).map(item=>({...item,nome:goalEvolutionPeriod==="Semana"?`S${item.key.slice(-2)} · ${monthLabel(item.key.slice(0,7))}`:monthLabel(item.key),percentual:item.registros?Number((item.atingidas/item.registros*100).toFixed(1)):0}));
+  },[filteredGoals,goalEvolutionPeriod]);
   const activeClients=clients.filter(c=>c.ativo);
   const churnedClients=clients.length-activeClients.length;
   const totalMrr=clients.reduce((sum,c)=>sum+c.mrr,0);
@@ -199,12 +282,15 @@ export default function Dashboard(){
         <button className={tab==="retencao"?"active":""} onClick={()=>setTab("retencao")}><TrendingUp/>Retenção</button>
         <button className={tab==="responsaveis"?"active":""} onClick={()=>setTab("responsaveis")}><Users/>Responsáveis</button>
         <button className={tab==="equipe"?"active":""} onClick={()=>setTab("equipe")}><UserRoundCog/>Clientes por função</button>
+        <button className={tab==="servicos"?"active":""} onClick={()=>setTab("servicos")}><BriefcaseBusiness/>Serviços</button>
+        <button className={tab==="squads"?"active":""} onClick={()=>setTab("squads")}><Users/>Clientes por squad</button>
+        <button className={tab==="metas"?"active":""} onClick={()=>setTab("metas")}><Target/>Metas de demandas</button>
       </nav>
       <div className="security"><ShieldCheck/><div><b>Conexão protegida</b><small>Sem PII ou credenciais</small></div></div>
     </aside>
     <section className="content">
       <header>
-        <div><p>PERFORMANCE & OPERAÇÕES</p><h1>{tab==="visao"?"Visão consolidada":tab==="retencao"?"Retenção & coortes":tab==="responsaveis"?"Performance por responsável":"Clientes por responsável e função"}</h1></div>
+        <div><p>PERFORMANCE & OPERAÇÕES</p><h1>{tab==="visao"?"Visão consolidada":tab==="retencao"?"Retenção & coortes":tab==="responsaveis"?"Performance por responsável":tab==="servicos"?"Performance por serviço":tab==="squads"?"Clientes por squad":tab==="metas"?"Resultados vs. metas":"Clientes por responsável e função"}</h1></div>
         <div className="header-actions"><div className="snapshot"><i/>{refreshing?"Atualizando…":`Atualizado • ${snapshotLabel}`}</div><div className="avatar">TF</div></div>
       </header>
       <div className="snapshot-note"><ShieldCheck size={16}/><b>Dados dinâmicos:</b> esta tela consulta automaticamente a nova base ao abrir e atualiza a cada minuto.</div>
@@ -288,7 +374,88 @@ export default function Dashboard(){
         </article>
       </>}
 
-      {tab!=="equipe"&&<article className="panel table-panel" id="carteira">
+      {tab==="servicos"&&<>
+        <section className="kpis compact-kpis">
+          <Kpi label="Valor recorrente" value={money(totalServiceRecurring)} detail={`${recurringServiceContracts} contratos recorrentes vigentes`} icon={CircleDollarSign} tone="positive"/>
+          <Kpi label="Valor oneshot" value={money(totalServiceOneShot)} detail={`${oneShotServiceContracts} contratos pontuais vigentes`} icon={BriefcaseBusiness} tone="warning"/>
+          <Kpi label="Ticket médio recorrente" value={money(averageServiceRecurring)} detail="média por contrato recorrente" icon={TrendingUp}/>
+          <Kpi label="Ticket médio oneshot" value={money(averageServiceOneShot)} detail="média por contrato pontual" icon={TrendingUp}/>
+        </section>
+        <article className="panel table-panel service-panel">
+          <div className="table-title"><div><small>CONTRATOS VIGENTES × PLANOS × SERVIÇOS</small><h2>Visão financeira por serviço</h2></div><span className="service-count">{visibleServices.length} serviços</span></div>
+          <div className="filters"><label><Search size={16}/><input value={serviceSearch} onChange={event=>setServiceSearch(event.target.value)} placeholder="Buscar serviço..."/></label>{serviceSearch&&<button className="clear" onClick={()=>setServiceSearch("")}><X size={14}/>Limpar</button>}</div>
+          <div className="table-wrap"><table className="service-table"><thead><tr><th>Serviço</th><th>Contratos vigentes</th><th>Valor recorrente</th><th>Valor oneshot</th><th>Ticket médio recorrente</th><th>Ticket médio oneshot</th></tr></thead><tbody>{visibleServices.map(service=><tr key={service.id}><td><b>{service.nome}</b><small>{service.recurringContracts} recorrentes · {service.oneShotContracts} pontuais</small></td><td>{service.activeContracts}</td><td>{money(service.recurring)}</td><td>{money(service.oneShot)}</td><td>{money(service.recurringTicket)}</td><td>{money(service.oneShotTicket)}</td></tr>)}</tbody></table></div>
+          {!visibleServices.length&&<div className="empty-state">Nenhum serviço encontrado.</div>}
+        </article>
+      </>}
+
+      {tab==="metas"&&<>
+        <section className="kpis compact-kpis">
+          <Kpi label="Meta de resultados" value={totalGoal.toLocaleString("pt-BR")} detail={`${filteredGoals.length} acompanhamentos semanais`} icon={Target}/>
+          <Kpi label="Resultados gerados" value={totalGoalResult.toLocaleString("pt-BR")} detail={`${totalGoal?Math.round(totalGoalResult/totalGoal*100):0}% da meta`} icon={TrendingUp} tone={totalGoalResult>=totalGoal?"positive":"warning"}/>
+          <Kpi label="Metas atingidas" value={`${filteredGoals.length?Math.round(goalsHit/filteredGoals.length*100):0}%`} detail={`${goalsHit} de ${filteredGoals.length} registros`} icon={ShieldCheck} tone="positive"/>
+          <Kpi label="Check-ins realizados" value={`${filteredGoals.length?Math.round(goalsChecked/filteredGoals.length*100):0}%`} detail={`${goalsChecked} de ${filteredGoals.length} registros`} icon={UserRoundCog}/>
+        </section>
+        <article className="panel goal-filter-panel">
+          <div className="panel-title"><div><small>FILTROS DA META_DEMANDAS</small><h2>Recorte do acompanhamento semanal</h2></div><span>{filteredGoals.length} registros</span></div>
+          <div className="filters goal-filters">
+            <select aria-label="Status do cliente nas metas" value={goalClientStatus} onChange={e=>setGoalClientStatus(e.target.value)}><option>Todos</option><option value="Ativos">Clientes ativos</option><option value="Inativos">Clientes inativos</option></select>
+            <select aria-label="Status do investidor nas metas" value={goalInvestorStatus} onChange={e=>setGoalInvestorStatus(e.target.value)}><option>Todos</option><option value="Ativos">Investidores ativos</option><option value="Inativos">Investidores inativos</option></select>
+            <select aria-label="Semana das metas" value={goalWeek} onChange={e=>setGoalWeek(e.target.value)}><option>Todos</option>{goalWeeks.map(value=><option key={value} value={value}>{`S${value.slice(-2)} · ${monthLabel(value.slice(0,7))}`}</option>)}</select>
+            <select aria-label="Mês das metas" value={goalMonth} onChange={e=>setGoalMonth(e.target.value)}><option>Todos</option>{goalMonths.map(value=><option key={value} value={value}>{monthLabel(value)}</option>)}</select>
+            <select aria-label="Atingimento da meta" value={goalHit} onChange={e=>setGoalHit(e.target.value)}><option>Todos</option><option value="Sim">Bateu a meta</option><option value="Não">Não bateu a meta</option></select>
+            <select aria-label="Check-in das metas" value={goalCheckin} onChange={e=>setGoalCheckin(e.target.value)}><option>Todos</option><option value="Sim">Realizou check-in</option><option value="Não">Não realizou check-in</option></select>
+            {(goalClientStatus!=="Todos"||goalInvestorStatus!=="Todos"||goalWeek!=="Todos"||goalMonth!=="Todos"||goalHit!=="Todos"||goalCheckin!=="Todos")&&<button className="clear" onClick={()=>{setGoalClientStatus("Todos");setGoalInvestorStatus("Todos");setGoalWeek("Todos");setGoalMonth("Todos");setGoalHit("Todos");setGoalCheckin("Todos")}}><X size={14}/>Limpar</button>}
+          </div>
+        </article>
+        <article className="panel">
+          <div className="panel-title"><div><small>% DE PROJETOS QUE BATERAM META</small><h2>Projetos com meta atingida por {GOAL_DIMENSIONS[goalView][0].toLowerCase()}</h2></div><span>projetos atingidos ÷ acompanhados</span></div>
+          <div className="team-function-tabs goal-dimensions">{Object.entries(GOAL_DIMENSIONS).map(([key,[label]])=><button key={key} className={goalView===key?"selected":""} onClick={()=>setGoalView(key)}>{label}</button>)}</div>
+          <ResponsiveContainer width="100%" height={380}><BarChart data={goalGrouped} layout="vertical" margin={{left:35,right:35}}><CartesianGrid stroke="#24272e" horizontal={false}/><XAxis type="number" domain={[0,100]} tickFormatter={value=>`${value}%`} tick={{fill:"#7f8591",fontSize:10}} axisLine={false} tickLine={false}/><YAxis type="category" dataKey="nome" width={145} tick={{fill:"#bcc0c8",fontSize:9}} axisLine={false} tickLine={false}/><Tooltip {...chartTip} formatter={(value,_name,item)=>[`${value}% (${item.payload.atingidas} de ${item.payload.registros})`,"Projetos que bateram meta"]}/><ReferenceLine x={75} stroke="#52d681" strokeDasharray="4 4"/><Bar name="% de projetos que bateram meta" dataKey="atingimento" radius={[0,5,5,0]}>{goalGrouped.map(item=><Cell key={item.nome} fill={item.atingimento>75?"#52d681":RED}/>)}</Bar></BarChart></ResponsiveContainer>
+        </article>
+        <article className="panel">
+          <div className="panel-title"><div><small>EVOLUÇÃO DO ATINGIMENTO</small><h2>% de projetos que bateram meta ao longo do tempo</h2></div><span>linha de referência em 75%</span></div>
+          <div className="team-function-tabs goal-dimensions"><button className={goalEvolutionPeriod==="Semana"?"selected":""} onClick={()=>setGoalEvolutionPeriod("Semana")}>Semanas</button><button className={goalEvolutionPeriod==="Mês"?"selected":""} onClick={()=>setGoalEvolutionPeriod("Mês")}>Meses</button></div>
+          <ResponsiveContainer width="100%" height={330}><AreaChart data={goalEvolution} margin={{left:0,right:20}}><defs><linearGradient id="goalEvolutionFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#52d681" stopOpacity=".34"/><stop offset="1" stopColor="#52d681" stopOpacity="0"/></linearGradient></defs><CartesianGrid stroke="#24272e" vertical={false}/><XAxis dataKey="nome" tick={{fill:"#7f8591",fontSize:9}} axisLine={false} tickLine={false}/><YAxis domain={[0,100]} tickFormatter={value=>`${value}%`} tick={{fill:"#7f8591",fontSize:10}} axisLine={false} tickLine={false}/><Tooltip {...chartTip} formatter={(value,_name,item)=>[`${value}% (${item.payload.atingidas} de ${item.payload.registros})`,"Projetos que bateram meta"]}/><ReferenceLine y={75} stroke="#52d681" strokeDasharray="4 4"/><Area type="monotone" dataKey="percentual" name="Projetos que bateram meta" stroke="#52d681" strokeWidth={2.5} fill="url(#goalEvolutionFill)" activeDot={{r:5,fill:"#52d681"}}/></AreaChart></ResponsiveContainer>
+        </article>
+        <article className="panel table-panel goal-table-panel">
+          <div className="table-title"><div><small>DETALHAMENTO SEMANAL</small><h2>Resultados por cliente e equipe</h2></div><span className="service-count">{filteredGoals.length} registros</span></div>
+          <div className="table-wrap"><table className="goal-table"><thead><tr><th>Cliente</th><th>Squad</th><th>Account</th><th>Gestor de tráfego</th><th>Designer</th><th>Período</th><th>Meta</th><th>Resultado</th><th>Atingimento</th><th>Check-in</th></tr></thead><tbody>{goalRows.map(row=><tr key={row.id}><td><b>{row.cliente}</b><small>{row.clienteAtivo?"Cliente ativo":"Cliente inativo"} · {row.objetivo}</small></td><td>{row.squad}</td><td>{row.account}</td><td>{row.gestorTrafego}</td><td>{row.designer}</td><td><b>S{String(row.semana).padStart(2,"0")}</b><small>{monthLabel(`${row.ano}-${String(row.mes).padStart(2,"0")}`)}</small></td><td>{row.meta.toLocaleString("pt-BR")}</td><td>{row.resultado.toLocaleString("pt-BR")}</td><td><span className={`badge ${row.bateuMeta?"on":"off"}`}>{row.bateuMeta?"Meta batida":"Abaixo da meta"}</span></td><td><span className={`badge ${row.checkinRealizado?"on":"off"}`}>{row.checkinRealizado?"Realizado":"Não realizado"}</span></td></tr>)}</tbody></table></div>
+          <div className="pagination"><span>Exibindo {goalRows.length} de {filteredGoals.length} registros</span><div><button disabled={visibleGoalPage<=1} onClick={()=>setGoalPage(value=>value-1)}><ChevronLeft/></button><b>{visibleGoalPage} / {goalPages}</b><button disabled={visibleGoalPage>=goalPages} onClick={()=>setGoalPage(value=>value+1)}><ChevronRight/></button></div></div>
+          {!filteredGoals.length&&<div className="empty-state">Nenhum acompanhamento encontrado para os filtros selecionados.</div>}
+        </article>
+      </>}
+
+      {tab==="squads"&&<>
+        <section className="kpis compact-kpis">
+          <Kpi label="Squads com carteira" value={squadRows.length} detail="squads com clientes ou receita" icon={Users}/>
+          <Kpi label="Clientes ativos" value={totalSquadActive} detail={`${totalSquadChurn} clientes em churn`} icon={BriefcaseBusiness} tone="positive"/>
+          <Kpi label="MRR dos squads" value={money(totalSquadMrr)} detail="contratos vigentes por carteira" icon={CircleDollarSign} tone="positive"/>
+          <Kpi label="Distribuição média" value={squadRows.length?Math.round((totalSquadActive+totalSquadChurn)/squadRows.length):0} detail="clientes por squad" icon={TrendingUp}/>
+        </section>
+        <section className="grid two squad-charts">
+          <article className="panel"><div className="panel-title"><div><small>COMPOSIÇÃO DAS CARTEIRAS</small><h2>Clientes ativos e churn por squad</h2></div><span>top 12 carteiras</span></div>
+            <div className="legend"><i className="green"/>Ativos <i className="red"/>Churn</div>
+            <ResponsiveContainer width="100%" height={360}><BarChart data={squadChartData} layout="vertical" margin={{left:18,right:18}}><CartesianGrid stroke="#24272e" horizontal={false}/><XAxis type="number" tick={{fill:"#7f8591",fontSize:10}} axisLine={false} tickLine={false}/><YAxis type="category" dataKey="nome" width={105} tick={{fill:"#bcc0c8",fontSize:10}} axisLine={false} tickLine={false}/><Tooltip {...chartTip}/><Bar dataKey="ativos" stackId="clientes" fill="#52d681"/><Bar dataKey="churned" stackId="clientes" fill={RED} radius={[0,5,5,0]}/></BarChart></ResponsiveContainer>
+          </article>
+          <article className="panel"><div className="panel-title"><div><small>VALOR DAS CARTEIRAS</small><h2>Recorrente e oneshot por squad</h2></div><span>contratos vigentes</span></div>
+            <div className="legend"><i className="green"/>Recorrente <i className="red"/>Oneshot</div>
+            <ResponsiveContainer width="100%" height={360}><BarChart data={squadChartData} margin={{left:-8,right:8,bottom:34}}><CartesianGrid stroke="#24272e" vertical={false}/><XAxis dataKey="nome" angle={-28} textAnchor="end" interval={0} tick={{fill:"#7f8591",fontSize:9}} axisLine={false} tickLine={false}/><YAxis tickFormatter={compact} tick={{fill:"#7f8591",fontSize:10}} axisLine={false} tickLine={false}/><Tooltip {...chartTip} formatter={value=>money(value)}/><Bar dataKey="mrr" fill="#52d681" radius={[5,5,0,0]}/><Bar dataKey="oneshot" fill={RED} radius={[5,5,0,0]}/></BarChart></ResponsiveContainer>
+          </article>
+        </section>
+        <article className="panel table-panel squad-summary-panel">
+          <div className="table-title"><div><small>RESUMO POR SQUAD</small><h2>Carteira e resultado financeiro</h2></div><span className="service-count">{squadRows.length} squads</span></div>
+          <div className="table-wrap"><table className="squad-summary-table"><thead><tr><th>Squad</th><th>Clientes ativos</th><th>Churn</th><th>Taxa de churn</th><th>MRR</th><th>Oneshot</th><th>LTV aproximado</th></tr></thead><tbody>{squadRows.map(item=><tr key={item.id}><td><b>{item.nome}</b><small>{item.ativos+item.churned} clientes na carteira</small></td><td>{item.ativos}</td><td>{item.churned}</td><td>{item.churn.toLocaleString("pt-BR",{maximumFractionDigits:1})}%</td><td>{money(item.mrr)}</td><td>{money(item.oneshot)}</td><td>{money(item.ltv)}</td></tr>)}</tbody></table></div>
+        </article>
+        <article className="panel table-panel squad-clients-panel">
+          <div className="table-title"><div><small>DETALHAMENTO DA CARTEIRA</small><h2>Clientes do squad</h2></div><span className="service-count">{filteredSquadClients.length} clientes</span></div>
+          <div className="filters"><label><Search size={16}/><input value={squadClientSearch} onChange={event=>{setSquadClientSearch(event.target.value);setSquadPage(1)}} placeholder="Buscar cliente ou responsável..."/></label><select aria-label="Selecionar squad da carteira" value={squadDetail} onChange={event=>{setSquadDetail(event.target.value);setSquadPage(1)}}><option>Todos</option>{squadRows.map(item=><option key={item.id}>{item.nome}</option>)}</select><select aria-label="Filtrar clientes por status" value={squadClientStatus} onChange={event=>{setSquadClientStatus(event.target.value);setSquadPage(1)}}><option value="Todos">Todos os clientes</option><option value="Ativos">Clientes ativos</option><option value="Inativos">Clientes inativos</option></select>{(squadDetail!=="Todos"||squadClientStatus!=="Todos"||squadClientSearch)&&<button className="clear" onClick={()=>{setSquadDetail("Todos");setSquadClientStatus("Todos");setSquadClientSearch("");setSquadPage(1)}}><X size={14}/>Limpar</button>}</div>
+          <div className="table-wrap"><table><thead><tr><th>Cliente</th><th>Squad</th><th>Responsável</th><th>Status</th><th>MRR</th><th>Oneshot</th><th>Contratos vigentes</th></tr></thead><tbody>{squadClientRows.map(client=><tr key={client.id}><td><b>{client.nome}</b><small>Entrada {client.entrada}</small></td><td>{client.squad}</td><td>{client.responsavel}</td><td><span className={`badge ${client.ativo?"on":"off"}`}>{client.ativo?"Ativo":"Churn"}</span></td><td>{money(client.mrr)}</td><td>{money(client.oneshot)}</td><td>{client.contratos}</td></tr>)}</tbody></table></div>
+          <div className="pagination"><span>Exibindo {squadClientRows.length} de {filteredSquadClients.length} clientes</span><div><button disabled={visibleSquadPage<=1} onClick={()=>setSquadPage(value=>value-1)}><ChevronLeft/></button><b>{visibleSquadPage} / {squadPages}</b><button disabled={visibleSquadPage>=squadPages} onClick={()=>setSquadPage(value=>value+1)}><ChevronRight/></button></div></div>
+        </article>
+      </>}
+
+      {tab!=="equipe"&&tab!=="servicos"&&tab!=="squads"&&tab!=="metas"&&<article className="panel table-panel" id="carteira">
         <div className="table-title"><div><small>CLIENTES × CONTRATOS</small><h2>Carteira consolidada</h2></div><button className="export" onClick={csv}><Download size={16}/>Exportar CSV</button></div>
         <div className="filters"><label><Search size={16}/><input value={search} onChange={e=>{setSearch(e.target.value);setPage(1)}} placeholder="Buscar cliente ou responsável..."/></label><select value={squad} onChange={e=>{setSquad(e.target.value);setPage(1)}}><option>Todos</option>{squads.map(s=><option key={s.id}>{s.nome}</option>)}</select><select value={status} onChange={e=>{setStatus(e.target.value);setPage(1)}}><option>Todos</option><option>Ativos</option><option>Churn</option><option>Sem contrato</option></select>{(squad!=="Todos"||status!=="Todos"||search)&&<button className="clear" onClick={clear}><X size={14}/>Limpar</button>}</div>
         <div className="table-wrap"><table><thead><tr><th>Cliente</th><th>Status</th><th>Squad / responsável</th><th>MRR</th><th>Oneshot</th><th>LTV aprox.</th><th>Contratos</th><th>Entrada</th></tr></thead><tbody>{pageRows.map(c=><tr key={c.id} className={c.ativo&&c.contratos===0?"flagged":""}><td><b>{c.nome}</b><small>Segmento {c.segmento??"—"} · Origem {c.origem??"—"}</small></td><td><span className={`badge ${c.ativo?"on":"off"}`}>{c.ativo?"Ativo":"Churn"}</span>{c.ativo&&c.contratos===0&&<span className="warning-tag">Sem contrato</span>}</td><td><b>{c.squad}</b><small>{c.responsavel}</small></td><td>{money(c.mrr)}</td><td>{money(c.oneshot)}</td><td>{money(c.ltv)}</td><td>{c.contratos}</td><td>{c.entrada}</td></tr>)}</tbody></table></div>

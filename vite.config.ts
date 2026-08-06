@@ -14,6 +14,10 @@ const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 const localBindingConfig = {
   main: "./worker/index.ts",
   compatibility_flags: ["nodejs_compat"],
+  vars: {
+    TFHUB_SUPABASE_URL: process.env.TFHUB_SUPABASE_URL ?? "",
+    TFHUB_SUPABASE_SECRET_KEY: process.env.TFHUB_SUPABASE_SECRET_KEY ?? "",
+  },
   d1_databases: d1
     ? [
         {
