@@ -150,10 +150,9 @@ export default function Dashboard(){
     const refreshTimer=window.setInterval(load,60000);
     return()=>{active=false;window.clearInterval(refreshTimer)};
   },[]);
-  const periodData=monthly.slice(-period);
   const filtered=useMemo(()=>clients.filter(c=>
     (squad==="Todos"||c.squad===squad)&&
-    (status==="Todos"||(status==="Ativos"?c.ativo:!c.ativo)||(status==="Sem contrato"&&c.ativo&&c.contratos===0))&&
+    (status==="Todos"||(status==="Ativos"&&c.ativo)||(status==="Inativos"&&!c.ativo)||(status==="Sem contrato"&&c.ativo&&c.contratos===0))&&
     `${c.nome} ${c.responsavel}`.toLowerCase().includes(search.toLowerCase())
   ),[clients,squad,status,search]);
   const pages=Math.max(1,Math.ceil(filtered.length/pageSize));
@@ -259,11 +258,35 @@ export default function Dashboard(){
     filteredGoals.forEach(row=>{const month=`${row.ano}-${String(row.mes).padStart(2,"0")}`;const key=goalEvolutionPeriod==="Semana"?`${month}-S${String(row.semana).padStart(2,"0")}`:month;const item=map.get(key)||{key,atingidas:0,registros:0};item.registros+=1;if(row.bateuMeta)item.atingidas+=1;map.set(key,item)});
     return [...map.values()].sort((a,b)=>a.key.localeCompare(b.key)).map(item=>({...item,nome:goalEvolutionPeriod==="Semana"?`S${item.key.slice(-2)} · ${monthLabel(item.key.slice(0,7))}`:monthLabel(item.key),percentual:item.registros?Number((item.atingidas/item.registros*100).toFixed(1)):0}));
   },[filteredGoals,goalEvolutionPeriod]);
-  const activeClients=clients.filter(c=>c.ativo);
-  const churnedClients=clients.length-activeClients.length;
-  const totalMrr=clients.reduce((sum,c)=>sum+c.mrr,0);
-  const totalOneShot=clients.reduce((sum,c)=>sum+(c.oneshot||0),0);
-  const totalLtv=clients.reduce((sum,c)=>sum+c.ltv,0);
+  const overviewClients=useMemo(()=>clients.filter(client=>
+    (squad==="Todos"||client.squad===squad)&&
+    (status==="Todos"||(status==="Ativos"&&client.ativo)||(status==="Inativos"&&!client.ativo)||(status==="Sem contrato"&&client.ativo&&client.contratos===0))
+  ),[clients,squad,status]);
+  const overviewSquads=useMemo(()=>{
+    const grouped=new Map();
+    overviewClients.forEach(client=>{
+      const name=client.squad||"Indefinido";
+      if(!grouped.has(name))grouped.set(name,{id:name,nome:name,ativos:0,churned:0,mrr:0,oneshot:0,ltv:0});
+      const item=grouped.get(name);
+      if(client.ativo)item.ativos+=1;else item.churned+=1;
+      item.mrr+=client.mrr||0;item.oneshot+=client.oneshot||0;item.ltv+=client.ltv||0;
+    });
+    return [...grouped.values()].map(item=>({...item,churn:item.ativos+item.churned?Number((item.churned/(item.ativos+item.churned)*100).toFixed(1)):0})).sort((a,b)=>b.mrr-a.mrr||b.ativos+b.churned-(a.ativos+a.churned));
+  },[overviewClients]);
+  const overviewMonthly=useMemo(()=>{
+    const map=new Map(monthly.map(item=>[item.mes,{...item,entradas:0,churns:0}]));
+    overviewClients.forEach(client=>{
+      if(client.entradaMes){if(!map.has(client.entradaMes))map.set(client.entradaMes,{mes:client.entradaMes,entradas:0,churns:0,contratos:0,mrr:0});map.get(client.entradaMes).entradas+=1}
+      if(client.churnMes){if(!map.has(client.churnMes))map.set(client.churnMes,{mes:client.churnMes,entradas:0,churns:0,contratos:0,mrr:0});map.get(client.churnMes).churns+=1}
+    });
+    return [...map.values()].sort((a,b)=>a.mes.localeCompare(b.mes));
+  },[monthly,overviewClients]);
+  const periodData=overviewMonthly.slice(-period);
+  const activeClients=overviewClients.filter(c=>c.ativo);
+  const churnedClients=overviewClients.length-activeClients.length;
+  const totalMrr=overviewClients.reduce((sum,c)=>sum+c.mrr,0);
+  const totalOneShot=overviewClients.reduce((sum,c)=>sum+(c.oneshot||0),0);
+  const totalLtv=overviewClients.reduce((sum,c)=>sum+c.ltv,0);
   const withoutContract=activeClients.filter(c=>c.contratos===0);
   const topOwner=owners[0];
   const bestRenewal=[...owners].sort((a,b)=>b.renovacao-a.renovacao)[0];
@@ -297,16 +320,16 @@ export default function Dashboard(){
       {dataError&&<div className="snapshot-note error-note"><AlertTriangle size={16}/><b>Falha de atualização:</b> {dataError}</div>}
       <div className="toolbar">
         <div className="period"><span>Período global</span>{[6,12,24].map(n=><button key={n} onClick={()=>setPeriod(n)} className={period===n?"selected":""}>{n} meses</button>)}</div>
-        <div className="selection">{squad!=="Todos"&&<span>Squad: {squad}<button onClick={()=>setSquad("Todos")}><X size={13}/></button></span>}</div>
+        {tab==="visao"&&<div className="overview-filters"><select aria-label="Filtrar Visão Geral por squad" value={squad} onChange={event=>{setSquad(event.target.value);setPage(1)}}><option>Todos</option>{squadRows.map(item=><option key={item.id}>{item.nome}</option>)}</select><select aria-label="Filtrar Visão Geral por status do cliente" value={status} onChange={event=>{setStatus(event.target.value);setPage(1)}}><option value="Todos">Todos os clientes</option><option value="Ativos">Clientes ativos</option><option value="Inativos">Clientes inativos</option></select>{(squad!=="Todos"||status!=="Todos")&&<button className="clear" onClick={()=>{setSquad("Todos");setStatus("Todos");setPage(1)}}><X size={14}/>Limpar</button>}</div>}
       </div>
 
       {tab==="visao"&&<>
         <section className="kpis">
-          <Kpi label="Clientes ativos" value={activeClients.length} detail={`de ${clients.length} clientes no histórico`} icon={Users}/>
+          <Kpi label="Clientes ativos" value={activeClients.length} detail={`de ${overviewClients.length} clientes no recorte`} icon={Users}/>
           <Kpi label="MRR ativo" value={money(totalMrr)} detail="contratos ativos vinculados" icon={CircleDollarSign} tone="positive"/>
           <Kpi label="Oneshot ativo" value={money(totalOneShot)} detail="valor bookado com prazo igual a zero" icon={BriefcaseBusiness} tone="warning"/>
           <Kpi label="LTV aproximado" value={money(totalLtv)} detail="valor + fee × meses contratados" icon={TrendingUp}/>
-          <Kpi label="Churn histórico" value={`${clients.length?((churnedClients/clients.length)*100).toFixed(1).replace(".",","):"0"}%`} detail={`${churnedClients} clientes inativos`} icon={ArrowDownRight} tone="danger"/>
+          <Kpi label="Churn histórico" value={`${overviewClients.length?((churnedClients/overviewClients.length)*100).toFixed(1).replace(".",","):"0"}%`} detail={`${churnedClients} clientes inativos`} icon={ArrowDownRight} tone="danger"/>
           <Kpi label="Sem contrato ativo" value={withoutContract.length} detail="clientes ativos para revisar" icon={AlertTriangle} tone="warning"/>
         </section>
         <section className="grid two">
@@ -315,15 +338,15 @@ export default function Dashboard(){
             <ResponsiveContainer width="100%" height={285}><AreaChart data={periodData}><defs><linearGradient id="greenFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#52d681" stopOpacity=".28"/><stop offset="1" stopColor="#52d681" stopOpacity="0"/></linearGradient><linearGradient id="redFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor={RED} stopOpacity=".3"/><stop offset="1" stopColor={RED} stopOpacity="0"/></linearGradient></defs><CartesianGrid stroke="#24272e" vertical={false}/><XAxis dataKey="mes" tickFormatter={monthLabel} tick={{fill:"#7f8591",fontSize:11}} axisLine={false} tickLine={false}/><YAxis tick={{fill:"#7f8591",fontSize:11}} axisLine={false} tickLine={false}/><Tooltip {...chartTip} labelFormatter={monthLabel}/><Area type="monotone" dataKey="entradas" stroke="#52d681" fill="url(#greenFill)" strokeWidth={2}/><Area type="monotone" dataKey="churns" stroke={RED} fill="url(#redFill)" strokeWidth={2}/></AreaChart></ResponsiveContainer>
           </article>
           <article className="panel"><div className="panel-title"><div><small>AÇÃO RECOMENDADA</small><h2>Leituras prioritárias</h2></div></div>
-            <div className="insights"><div className="insight hot"><AlertTriangle/><p><b>{withoutContract.length} clientes ativos sem contrato ativo</b><span>{withoutContract.slice(0,3).map(c=>c.nome).join(", ")||"Nenhuma inconsistência encontrada"}.</span></p></div><div className="insight"><ArrowUpRight/><p><b>Squad com menor churn</b><span>{[...squads].filter(s=>s.ativos+s.churned>5).sort((a,b)=>a.churn-b.churn)[0]?.nome||"—"} entre carteiras relevantes.</span></p></div><div className="insight"><TrendingUp/><p><b>Dados atuais do TFHub</b><span>Indicadores recalculados a cada abertura do dashboard.</span></p></div></div>
+            <div className="insights"><div className="insight hot"><AlertTriangle/><p><b>{withoutContract.length} clientes ativos sem contrato ativo</b><span>{withoutContract.slice(0,3).map(c=>c.nome).join(", ")||"Nenhuma inconsistência encontrada"}.</span></p></div><div className="insight"><ArrowUpRight/><p><b>Squad com menor churn</b><span>{[...overviewSquads].filter(s=>s.ativos+s.churned>5).sort((a,b)=>a.churn-b.churn)[0]?.nome||"—"} entre carteiras relevantes.</span></p></div><div className="insight"><TrendingUp/><p><b>Dados atuais do TFHub</b><span>Indicadores recalculados para os filtros selecionados.</span></p></div></div>
           </article>
         </section>
         <section className="grid two">
           <article className="panel"><div className="panel-title"><div><small>CLIQUE PARA FILTRAR A CARTEIRA</small><h2>MRR por squad</h2></div></div>
-            <ResponsiveContainer width="100%" height={300}><BarChart data={squads.slice(0,7)} layout="vertical" margin={{left:10,right:25}}><CartesianGrid stroke="#24272e" horizontal={false}/><XAxis type="number" tickFormatter={compact} tick={{fill:"#7f8591",fontSize:10}} axisLine={false} tickLine={false}/><YAxis type="category" dataKey="nome" width={100} tick={{fill:"#bcc0c8",fontSize:11}} axisLine={false} tickLine={false}/><Tooltip {...chartTip} formatter={v=>money(v)}/><Bar dataKey="mrr" radius={[0,6,6,0]} onClick={d=>chooseSquad(d.nome)} cursor="pointer">{squads.slice(0,7).map(s=><Cell key={s.id} fill={squad===s.nome?RED:"#6e737d"}/>)}</Bar></BarChart></ResponsiveContainer>
+            <ResponsiveContainer width="100%" height={300}><BarChart data={overviewSquads.slice(0,7)} layout="vertical" margin={{left:10,right:25}}><CartesianGrid stroke="#24272e" horizontal={false}/><XAxis type="number" tickFormatter={compact} tick={{fill:"#7f8591",fontSize:10}} axisLine={false} tickLine={false}/><YAxis type="category" dataKey="nome" width={100} tick={{fill:"#bcc0c8",fontSize:11}} axisLine={false} tickLine={false}/><Tooltip {...chartTip} formatter={v=>money(v)}/><Bar dataKey="mrr" radius={[0,6,6,0]} onClick={d=>chooseSquad(d.nome)} cursor="pointer">{overviewSquads.slice(0,7).map(s=><Cell key={s.id} fill={squad===s.nome?RED:"#6e737d"}/>)}</Bar></BarChart></ResponsiveContainer>
           </article>
           <article className="panel"><div className="panel-title"><div><small>RISCO POR EQUIPE</small><h2>Taxa de churn por squad</h2></div><span>clique em uma barra</span></div>
-            <ResponsiveContainer width="100%" height={300}><BarChart data={squads.slice(0,7)} margin={{left:-15,right:8}}><CartesianGrid stroke="#24272e" vertical={false}/><XAxis dataKey="nome" tick={{fill:"#7f8591",fontSize:10}} axisLine={false} tickLine={false}/><YAxis domain={[0,100]} tickFormatter={v=>`${v}%`} tick={{fill:"#7f8591",fontSize:10}} axisLine={false} tickLine={false}/><Tooltip {...chartTip} formatter={v=>`${v}%`}/><Bar dataKey="churn" radius={[6,6,0,0]} onClick={d=>chooseSquad(d.nome)} cursor="pointer">{squads.slice(0,7).map(s=><Cell key={s.id} fill={s.churn>60?RED:s.churn>45?"#f0a33a":"#52d681"}/>)}</Bar></BarChart></ResponsiveContainer>
+            <ResponsiveContainer width="100%" height={300}><BarChart data={overviewSquads.slice(0,7)} margin={{left:-15,right:8}}><CartesianGrid stroke="#24272e" vertical={false}/><XAxis dataKey="nome" tick={{fill:"#7f8591",fontSize:10}} axisLine={false} tickLine={false}/><YAxis domain={[0,100]} tickFormatter={v=>`${v}%`} tick={{fill:"#7f8591",fontSize:10}} axisLine={false} tickLine={false}/><Tooltip {...chartTip} formatter={v=>`${v}%`}/><Bar dataKey="churn" radius={[6,6,0,0]} onClick={d=>chooseSquad(d.nome)} cursor="pointer">{overviewSquads.slice(0,7).map(s=><Cell key={s.id} fill={s.churn>60?RED:s.churn>45?"#f0a33a":"#52d681"}/>)}</Bar></BarChart></ResponsiveContainer>
           </article>
         </section>
       </>}
@@ -457,7 +480,7 @@ export default function Dashboard(){
 
       {tab!=="equipe"&&tab!=="servicos"&&tab!=="squads"&&tab!=="metas"&&<article className="panel table-panel" id="carteira">
         <div className="table-title"><div><small>CLIENTES × CONTRATOS</small><h2>Carteira consolidada</h2></div><button className="export" onClick={csv}><Download size={16}/>Exportar CSV</button></div>
-        <div className="filters"><label><Search size={16}/><input value={search} onChange={e=>{setSearch(e.target.value);setPage(1)}} placeholder="Buscar cliente ou responsável..."/></label><select value={squad} onChange={e=>{setSquad(e.target.value);setPage(1)}}><option>Todos</option>{squads.map(s=><option key={s.id}>{s.nome}</option>)}</select><select value={status} onChange={e=>{setStatus(e.target.value);setPage(1)}}><option>Todos</option><option>Ativos</option><option>Churn</option><option>Sem contrato</option></select>{(squad!=="Todos"||status!=="Todos"||search)&&<button className="clear" onClick={clear}><X size={14}/>Limpar</button>}</div>
+        <div className="filters"><label><Search size={16}/><input value={search} onChange={e=>{setSearch(e.target.value);setPage(1)}} placeholder="Buscar cliente ou responsável..."/></label><select value={squad} onChange={e=>{setSquad(e.target.value);setPage(1)}}><option>Todos</option>{squads.map(s=><option key={s.id}>{s.nome}</option>)}</select><select value={status} onChange={e=>{setStatus(e.target.value);setPage(1)}}><option>Todos</option><option value="Ativos">Ativos</option><option value="Inativos">Inativos</option><option value="Sem contrato">Sem contrato</option></select>{(squad!=="Todos"||status!=="Todos"||search)&&<button className="clear" onClick={clear}><X size={14}/>Limpar</button>}</div>
         <div className="table-wrap"><table><thead><tr><th>Cliente</th><th>Status</th><th>Squad / responsável</th><th>MRR</th><th>Oneshot</th><th>LTV aprox.</th><th>Contratos</th><th>Entrada</th></tr></thead><tbody>{pageRows.map(c=><tr key={c.id} className={c.ativo&&c.contratos===0?"flagged":""}><td><b>{c.nome}</b><small>Segmento {c.segmento??"—"} · Origem {c.origem??"—"}</small></td><td><span className={`badge ${c.ativo?"on":"off"}`}>{c.ativo?"Ativo":"Churn"}</span>{c.ativo&&c.contratos===0&&<span className="warning-tag">Sem contrato</span>}</td><td><b>{c.squad}</b><small>{c.responsavel}</small></td><td>{money(c.mrr)}</td><td>{money(c.oneshot)}</td><td>{money(c.ltv)}</td><td>{c.contratos}</td><td>{c.entrada}</td></tr>)}</tbody></table></div>
         <div className="pagination"><span>Exibindo {pageRows.length} de {filtered.length} registros filtrados</span><div><button disabled={page<=1} onClick={()=>setPage(p=>p-1)}><ChevronLeft/></button><b>{Math.min(page,pages)} / {pages}</b><button disabled={page>=pages} onClick={()=>setPage(p=>p+1)}><ChevronRight/></button></div></div>
       </article>}

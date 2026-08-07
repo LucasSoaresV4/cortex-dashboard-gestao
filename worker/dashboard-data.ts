@@ -48,15 +48,17 @@ function number(value: unknown) {
 
 function recurringValue(contract: Row) {
   const bookedValue = contract.valor_bookado;
+  const bookedAmount = number(bookedValue);
   const months = number(contract.meses);
   const hasBookedValue =
     bookedValue !== null &&
     bookedValue !== undefined &&
-    String(bookedValue).trim() !== "";
+    String(bookedValue).trim() !== "" &&
+    bookedAmount > 0;
 
   if (hasBookedValue && months === 0) return 0;
   return hasBookedValue && months > 0
-    ? number(bookedValue) / months
+    ? bookedAmount / months
     : number(contract.fee_mensal);
 }
 
@@ -214,6 +216,8 @@ export async function getDashboardData(env: DatabaseEnv) {
           (client.segmento_id ? `#${client.segmento_id}` : "—"),
         origem: client.origem_id ? `#${client.origem_id}` : "—",
         entrada: formatBr(client.data_entrada),
+        entradaMes: monthKey(client.data_entrada),
+        churnMes: monthKey(client.data_churn),
       };
     });
 
