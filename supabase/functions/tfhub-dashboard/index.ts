@@ -131,6 +131,7 @@ Deno.serve(async (request) => {
     db.from("contrato_planos").select("contrato_id,plano_id"),
     db.from("contrato_equipe").select("contrato_equipe_id,contrato_id,investidor_id,servico_id"),
     db.from("meta_demandas").select("*"),
+    db.from("investidor_capacities").select("investidor_id,quantidade_clientes"),
   ]);
 
   const failed = queries.find((query) => query.error);
@@ -139,11 +140,14 @@ Deno.serve(async (request) => {
     return json({ error: "Não foi possível consultar os dados atuais" }, 500);
   }
 
-  const [clientes, contratos, squads, investidores, equipe, funcoes, servicos, segmentos, planos, contratoPlanos, contratoEquipe, metaDemandas] =
+  const [clientes, contratos, squads, investidores, equipe, funcoes, servicos, segmentos, planos, contratoPlanos, contratoEquipe, metaDemandas, investidorCapacities] =
     queries.map((query) => query.data ?? []);
 
   const squadById = new Map(squads.map((row) => [String(row.squad_id), row.nome]));
   const investorById = new Map(investidores.map((row) => [String(row.investidor_id), row]));
+  const capacityByInvestorId = new Map(
+    investidorCapacities.map((row) => [String(row.investidor_id), number(row.quantidade_clientes)]),
+  );
   const functionById = new Map(funcoes.map((row) => [String(row.funcao_id), row.nome]));
   const serviceById = new Map(servicos.map((row) => [String(row.servico_id), row.nome]));
   const segmentById = new Map(segmentos.map((row) => [String(row.segmento_id), row.nome]));
@@ -421,6 +425,8 @@ Deno.serve(async (request) => {
         (inferredFinancials?.oneShot ?? 0),
       Boolean(client.ativo),
       Boolean(investor.ativo),
+      investor.investidor_id,
+      capacityByInvestorId.get(String(investor.investidor_id)) ?? null,
     ]];
   });
   const demandGoals = metaDemandas.map((row) => {

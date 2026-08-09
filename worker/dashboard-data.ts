@@ -135,6 +135,7 @@ export async function getDashboardData(env: DatabaseEnv) {
     contratoPlanos,
     contratoEquipe,
     metaDemandas,
+    investidorCapacities,
   ] = await Promise.all([
     fetchTable(env, "clientes", "cliente_id,nome,gmv,ativo,investidor_id,segmento_id,origem_id,data_entrada,data_churn,squad_responsavel_id"),
     fetchTable(env, "contratos", "contrato_id,cliente_id,investidor_id,squad_id,valor_contrato,fee_mensal,valor_bookado,data_assinatura,data_contrato,data_fim_contrato,ativo,renovavel,meses,tipo"),
@@ -152,6 +153,7 @@ export async function getDashboardData(env: DatabaseEnv) {
       "contrato_equipe_id,contrato_id,investidor_id,servico_id",
     ),
     fetchTable(env, "meta_demandas", "*"),
+    fetchTable(env, "investidor_capacities", "investidor_id,quantidade_clientes"),
   ]);
 
     const squadById = new Map(
@@ -159,6 +161,12 @@ export async function getDashboardData(env: DatabaseEnv) {
     );
     const investorById = new Map(
       investidores.map((row) => [String(row.investidor_id), row]),
+    );
+    const capacityByInvestorId = new Map(
+      investidorCapacities.map((row) => [
+        String(row.investidor_id),
+        number(row.quantidade_clientes),
+      ]),
     );
     const functionById = new Map(
       funcoes.map((row) => [String(row.funcao_id), row.nome]),
@@ -539,6 +547,8 @@ export async function getDashboardData(env: DatabaseEnv) {
             (inferredFinancials?.oneShot ?? 0),
           Boolean(client.ativo),
           Boolean(investor.ativo),
+          investor.investidor_id,
+          capacityByInvestorId.get(String(investor.investidor_id)) ?? null,
         ],
       ];
     });
