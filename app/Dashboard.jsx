@@ -7,7 +7,7 @@ import {
 } from "recharts";
 import {
   AlertTriangle, ArrowDownRight, ArrowUpRight, BriefcaseBusiness, ChevronLeft,
-  ChevronRight, CircleDollarSign, Download, Filter, LayoutDashboard, Search,
+  ChevronRight, CircleDollarSign, Download, Filter, Gauge, LayoutDashboard, PanelLeftClose, PanelLeftOpen, Search,
   ShieldCheck, Target, TrendingUp, UserRoundCog, Users, X
 } from "lucide-react";
 import snapshotTeamRows from "./team-data";
@@ -67,6 +67,7 @@ export default function Dashboard(){
   const [dataError,setDataError]=useState("");
   const [refreshing,setRefreshing]=useState(true);
   const [tab,setTab]=useState("visao");
+  const [sidebarCollapsed,setSidebarCollapsed]=useState(false);
   const [period,setPeriod]=useState(12);
   const [squad,setSquad]=useState("Todos");
   const [search,setSearch]=useState("");
@@ -91,11 +92,17 @@ export default function Dashboard(){
   const [goalCheckin,setGoalCheckin]=useState("Todos");
   const [goalPage,setGoalPage]=useState(1);
   const [goalEvolutionPeriod,setGoalEvolutionPeriod]=useState("Semana");
+  const [capacitySquad,setCapacitySquad]=useState("Todos");
+  const [capacityFunction,setCapacityFunction]=useState("Todos");
+  const [capacityInvestor,setCapacityInvestor]=useState("Todos");
+  const [capacityInvestorStatus,setCapacityInvestorStatus]=useState("Ativos");
+  const [capacityDimension,setCapacityDimension]=useState("squad");
   const pageSize=8;
   const monthly=liveData?.monthly||snapshotMonthly;
   const clients=liveData?.clients||snapshotClients;
   const teamRows=liveData?.teamRows||snapshotTeamRows;
   const demandGoals=useMemo(()=>liveData?.demandGoals||[],[liveData?.demandGoals]);
+  const capacityRows=useMemo(()=>liveData?.investorCapacityRows||[],[liveData?.investorCapacityRows]);
   const extractedAt=liveData?.extractedAt;
   useEffect(()=>{
     let active=true;
@@ -171,6 +178,33 @@ export default function Dashboard(){
   const uniqueTeamClients=new Set(visibleTeam.map(r=>r.cliente)).size;
   const totalTeamFee=visibleTeam.reduce((sum,r)=>sum+r.fee,0);
   const totalTeamOneShot=visibleTeam.reduce((sum,r)=>sum+r.oneshot,0);
+  const statusCapacityRows=useMemo(()=>capacityRows.filter(row=>capacityInvestorStatus==="Todos"||(capacityInvestorStatus==="Ativos"?row.ativo:!row.ativo)),[capacityRows,capacityInvestorStatus]);
+  const capacitySquads=useMemo(()=>[...new Set(statusCapacityRows.map(row=>row.squad))].sort((a,b)=>a.localeCompare(b,"pt-BR")),[statusCapacityRows]);
+  const capacityFunctions=useMemo(()=>[...new Set(statusCapacityRows.map(row=>row.funcao))].sort((a,b)=>a.localeCompare(b,"pt-BR")),[statusCapacityRows]);
+  const capacityInvestors=useMemo(()=>[...new Set(statusCapacityRows.filter(row=>capacitySquad==="Todos"||row.squad===capacitySquad).map(row=>row.nome))].sort((a,b)=>a.localeCompare(b,"pt-BR")),[statusCapacityRows,capacitySquad]);
+  const filteredCapacityRows=useMemo(()=>statusCapacityRows.filter(row=>
+    (capacitySquad==="Todos"||row.squad===capacitySquad)&&
+    (capacityFunction==="Todos"||row.funcao===capacityFunction)&&
+    (capacityInvestor==="Todos"||row.nome===capacityInvestor)
+  ),[statusCapacityRows,capacitySquad,capacityFunction,capacityInvestor]);
+  const capacityTotals=useMemo(()=>{
+    const cadastrados=filteredCapacityRows.filter(row=>row.capacidade!=null&&row.capacidade>0);
+    const clientes=filteredCapacityRows.reduce((sum,row)=>sum+row.clientesAtivos,0);
+    const clientesCadastrados=cadastrados.reduce((sum,row)=>sum+row.clientesAtivos,0);
+    const capacidade=cadastrados.reduce((sum,row)=>sum+row.capacidade,0);
+    return {clientes,capacidade,ocupacao:capacidade?Number((clientesCadastrados/capacidade*100).toFixed(1)):0,excedidos:cadastrados.filter(row=>row.clientesAtivos>row.capacidade).length,semCadastro:filteredCapacityRows.length-cadastrados.length,cadastrados:cadastrados.length};
+  },[filteredCapacityRows]);
+  const capacityGrouped=useMemo(()=>{
+    const map=new Map();
+    filteredCapacityRows.forEach(row=>{
+      const nome=capacityDimension==="investidor"?row.nome:capacityDimension==="funcao"?row.funcao:row.squad;
+      const item=map.get(nome)||{nome,clientes:0,capacidade:0,investidores:0,semCadastro:0};
+      item.clientes+=row.clientesAtivos;item.investidores+=1;
+      if(row.capacidade!=null&&row.capacidade>0)item.capacidade+=row.capacidade;else item.semCadastro+=1;
+      map.set(nome,item);
+    });
+    return [...map.values()].map(item=>({...item,ocupacao:item.capacidade?Number((item.clientes/item.capacidade*100).toFixed(1)):null})).sort((a,b)=>(b.ocupacao??-1)-(a.ocupacao??-1)||b.clientes-a.clientes).slice(0,20);
+  },[filteredCapacityRows,capacityDimension]);
   const squadRows=useMemo(()=>{
     const grouped=new Map();
     clients.forEach(client=>{
@@ -264,12 +298,13 @@ export default function Dashboard(){
     const blob=new Blob(["\ufeff"+[cols,...rows].map(r=>r.map(v=>`"${String(v??"").replaceAll('"','""')}"`).join(";")).join("\n")],{type:"text/csv;charset=utf-8"});
     const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`tfhub-equipe-${teamFunction.toLowerCase().replaceAll(" ","-")}.csv`;a.click();URL.revokeObjectURL(a.href);
   };
-  return <main>
+  return <main className={sidebarCollapsed?"sidebar-collapsed":""}>
     <aside className="sidebar">
-      <div className="brand"><span>V4</span><div><b>TF HUB</b><small>GESTÃO DE CARTEIRA</small></div></div>
+      <div className="brand"><span>V4</span><div><b>TF HUB</b><small>GESTÃO DE CARTEIRA</small></div><button className="sidebar-toggle" type="button" aria-label={sidebarCollapsed?"Expandir menu lateral":"Recolher menu lateral"} title={sidebarCollapsed?"Expandir menu":"Recolher menu"} onClick={()=>setSidebarCollapsed(value=>!value)}>{sidebarCollapsed?<PanelLeftOpen/>:<PanelLeftClose/>}</button></div>
       <nav>
         <button className={tab==="visao"?"active":""} onClick={()=>setTab("visao")}><LayoutDashboard/>Visão geral</button>
         <button className={tab==="equipe"?"active":""} onClick={()=>setTab("equipe")}><UserRoundCog/>Clientes por função</button>
+        <button className={tab==="capacity"?"active":""} onClick={()=>setTab("capacity")}><Gauge/>Capacity</button>
         <button className={tab==="squads"?"active":""} onClick={()=>setTab("squads")}><Users/>Clientes por squad</button>
         <button className={tab==="metas"?"active":""} onClick={()=>setTab("metas")}><Target/>Metas de demandas</button>
       </nav>
@@ -277,7 +312,7 @@ export default function Dashboard(){
     </aside>
     <section className="content">
       <header>
-        <div><p>PERFORMANCE & OPERAÇÕES</p><h1>{tab==="visao"?"Visão consolidada":tab==="squads"?"Clientes por squad":tab==="metas"?"Resultados vs. metas":"Clientes por responsável e função"}</h1></div>
+        <div><p>PERFORMANCE & OPERAÇÕES</p><h1>{tab==="visao"?"Visão consolidada":tab==="capacity"?"Capacity dos investidores":tab==="squads"?"Clientes por squad":tab==="metas"?"Resultados vs. metas":"Clientes por responsável e função"}</h1></div>
         <div className="header-actions"><div className="snapshot"><i/>{refreshing?"Atualizando…":`Atualizado • ${snapshotLabel}`}</div><div className="avatar">TF</div></div>
       </header>
       <div className="snapshot-note"><ShieldCheck size={16}/><b>Dados dinâmicos:</b> esta tela consulta automaticamente a nova base ao abrir e atualiza a cada minuto.</div>
@@ -287,6 +322,7 @@ export default function Dashboard(){
         <div className="overview-filters top-screen-filters">
           {tab==="visao"&&<><label className="filter-field"><span>Squad</span><select aria-label="Filtrar Visão Geral por squad" value={squad} onChange={event=>{setSquad(event.target.value);setPage(1)}}><option>Todos</option>{squadRows.map(item=><option key={item.id}>{item.nome}</option>)}</select></label><label className="filter-field"><span>Status do cliente</span><select aria-label="Filtrar Visão Geral por status do cliente" value={status} onChange={event=>{setStatus(event.target.value);setPage(1)}}><option value="Todos">Todos os clientes</option><option value="Ativos">Clientes ativos</option><option value="Inativos">Clientes inativos</option><option value="Sem contrato">Sem contrato ativo</option></select></label></>}
           {tab==="equipe"&&<label className="filter-field"><span>Squad</span><select aria-label="Filtrar Clientes por Função por squad" value={teamSquad} onChange={event=>setTeamSquad(event.target.value)}><option>Todos</option>{teamSquads.map(name=><option key={name}>{name}</option>)}</select></label>}
+          {tab==="capacity"&&<label className="filter-field"><span>Squad</span><select aria-label="Filtrar Capacity por squad" value={capacitySquad} onChange={event=>{setCapacitySquad(event.target.value);setCapacityInvestor("Todos")}}><option>Todos</option>{capacitySquads.map(name=><option key={name}>{name}</option>)}</select></label>}
           {tab==="squads"&&<label className="filter-field"><span>Squad</span><select aria-label="Filtrar Clientes por Squad" value={squadDetail} onChange={event=>{setSquadDetail(event.target.value);setSquadPage(1)}}><option>Todos</option>{squadRows.map(item=><option key={item.id}>{item.nome}</option>)}</select></label>}
           {tab==="metas"&&<label className="filter-field"><span>Squad</span><select aria-label="Filtrar Metas de Demandas por squad" value={goalSquad} onChange={event=>{setGoalSquad(event.target.value);setGoalPage(1)}}><option>Todos</option>{goalSquads.map(name=><option key={name}>{name}</option>)}</select></label>}
         </div>
@@ -349,6 +385,35 @@ export default function Dashboard(){
             </section>)}
           </div>
           {!groupedTeam.length&&<div className="empty-state">Nenhum vínculo encontrado para os filtros selecionados.</div>}
+        </article>
+      </>}
+
+      {tab==="capacity"&&<>
+        <section className="kpis capacity-kpis">
+          <Kpi label="Ocupação geral" value={`${capacityTotals.ocupacao.toLocaleString("pt-BR")}%`} detail={`${capacityTotals.cadastrados} investidores com capacidade cadastrada`} icon={Gauge} tone={capacityTotals.ocupacao>100?"danger":capacityTotals.ocupacao>=75?"warning":"positive"}/>
+          <Kpi label="Clientes em atendimento" value={capacityTotals.clientes} detail="soma das carteiras ativas dos investidores" icon={Users}/>
+          <Kpi label="Capacidade máxima" value={capacityTotals.capacidade} detail="total de posições cadastradas" icon={BriefcaseBusiness} tone="positive"/>
+          <Kpi label="Acima da capacidade" value={capacityTotals.excedidos} detail="investidores acima de 100%" icon={AlertTriangle} tone={capacityTotals.excedidos?"danger":"positive"}/>
+          <Kpi label="Sem capacidade cadastrada" value={capacityTotals.semCadastro} detail="investidores ativos para revisar" icon={AlertTriangle} tone={capacityTotals.semCadastro?"warning":"positive"}/>
+        </section>
+        <article className="panel capacity-filter-panel">
+          <div className="panel-title"><div><small>FILTROS DE CAPACITY</small><h2>Recorte da operação</h2></div><span>{filteredCapacityRows.length} investidores</span></div>
+          <div className="filters capacity-filters">
+            <label className="filter-field"><span>Função</span><select aria-label="Filtrar Capacity por função" value={capacityFunction} onChange={event=>setCapacityFunction(event.target.value)}><option>Todos</option>{capacityFunctions.map(name=><option key={name}>{name}</option>)}</select></label>
+            <label className="filter-field"><span>Investidor</span><select aria-label="Filtrar Capacity por investidor" value={capacityInvestor} onChange={event=>setCapacityInvestor(event.target.value)}><option>Todos</option>{capacityInvestors.map(name=><option key={name}>{name}</option>)}</select></label>
+            <label className="filter-field"><span>Status do investidor</span><select aria-label="Filtrar Capacity por status do investidor" value={capacityInvestorStatus} onChange={event=>{setCapacityInvestorStatus(event.target.value);setCapacitySquad("Todos");setCapacityFunction("Todos");setCapacityInvestor("Todos")}}><option value="Todos">Todos os investidores</option><option value="Ativos">Investidores ativos</option><option value="Inativos">Investidores inativos</option></select></label>
+            {(capacitySquad!=="Todos"||capacityFunction!=="Todos"||capacityInvestor!=="Todos"||capacityInvestorStatus!=="Ativos")&&<button className="clear" onClick={()=>{setCapacitySquad("Todos");setCapacityFunction("Todos");setCapacityInvestor("Todos");setCapacityInvestorStatus("Ativos")}}><X size={14}/>Limpar</button>}
+          </div>
+        </article>
+        <article className="panel">
+          <div className="panel-title"><div><small>CLIENTES EM ATENDIMENTO × CAPACIDADE MÁXIMA</small><h2>Análise segmentada</h2></div><span>ocupação das posições cadastradas</span></div>
+          <div className="filter-section-label inline-label">Segmentar por</div><div className="team-function-tabs goal-dimensions capacity-dimensions"><button className={capacityDimension==="squad"?"selected":""} onClick={()=>setCapacityDimension("squad")}>Squad</button><button className={capacityDimension==="funcao"?"selected":""} onClick={()=>setCapacityDimension("funcao")}>Função</button><button className={capacityDimension==="investidor"?"selected":""} onClick={()=>setCapacityDimension("investidor")}>Investidor</button></div>
+          <ResponsiveContainer width="100%" height={Math.max(320,capacityGrouped.length*42)}><BarChart data={capacityGrouped} layout="vertical" margin={{left:35,right:30}}><CartesianGrid stroke="#24272e" horizontal={false}/><XAxis type="number" tick={{fill:"#7f8591",fontSize:10}} axisLine={false} tickLine={false}/><YAxis type="category" dataKey="nome" width={155} tick={{fill:"#bcc0c8",fontSize:9}} axisLine={false} tickLine={false}/><Tooltip {...chartTip} formatter={(value,name)=>[name==="capacidade"?`${value} posições`:`${value} clientes`,name==="capacidade"?"Capacidade máxima":"Em atendimento"]} labelFormatter={(label,payload)=>payload?.[0]?.payload?.ocupacao!=null?`${label} · ${payload[0].payload.ocupacao}%`:label}/><Bar dataKey="capacidade" name="capacidade" fill="#515762" radius={[0,5,5,0]}/><Bar dataKey="clientes" name="clientes" radius={[0,5,5,0]}>{capacityGrouped.map(item=><Cell key={item.nome} fill={item.ocupacao>100?RED:item.ocupacao>=75?"#f0a33a":"#52d681"}/>)}</Bar></BarChart></ResponsiveContainer>
+        </article>
+        <article className="panel table-panel capacity-table-panel">
+          <div className="table-title"><div><small>DETALHAMENTO POR INVESTIDOR</small><h2>Ocupação individual das carteiras</h2></div><span className="service-count">{filteredCapacityRows.length} investidores</span></div>
+          <div className="table-wrap"><table className="capacity-table"><thead><tr><th>Investidor</th><th>Squad</th><th>Função</th><th>Clientes ativos</th><th>Capacidade máxima</th><th>% da capacidade</th><th>Disponibilidade</th></tr></thead><tbody>{filteredCapacityRows.slice().sort((a,b)=>(b.ocupacao??-1)-(a.ocupacao??-1)).map(row=>{const disponivel=row.capacidade==null?null:row.capacidade-row.clientesAtivos;return <tr key={row.id} className={row.ocupacao>100?"capacity-row-over":""}><td><b>{row.nome}</b></td><td>{row.squad}</td><td>{row.funcao}</td><td>{row.clientesAtivos}</td><td>{row.capacidade??"Não cadastrada"}</td><td><div className={`capacity-percent ${row.ocupacao==null?"unknown":row.ocupacao>100?"over":row.ocupacao>=75?"near":"ok"}`}><span>{row.ocupacao==null?"—":`${row.ocupacao.toLocaleString("pt-BR")}%`}</span><i><em style={{width:`${Math.min(row.ocupacao??0,100)}%`}}/></i></div></td><td>{disponivel==null?"—":disponivel<0?`${Math.abs(disponivel)} acima do limite`:`${disponivel} disponíveis`}</td></tr>})}</tbody></table></div>
+          {!filteredCapacityRows.length&&<div className="empty-state">Nenhum investidor encontrado para os filtros selecionados.</div>}
         </article>
       </>}
 

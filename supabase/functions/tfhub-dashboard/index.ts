@@ -398,6 +398,7 @@ Deno.serve(async (request) => {
     }
   }
   const clientById = new Map(clientes.map((row) => [String(row.cliente_id), row]));
+  const activeClientIdsByInvestor = new Map<string, Set<string>>();
   const teamRows = equipe.flatMap((link) => {
     const client = clientById.get(String(link.cliente_id));
     const investor = investorById.get(String(link.investidor_id));
@@ -413,6 +414,11 @@ Deno.serve(async (request) => {
       `${String(link.cliente_id)}:${String(link.servico_id)}`,
     );
     if (!assignedFinancials && !inferredFinancials) return [];
+    if (Boolean(client.ativo)) {
+      const investorId = String(investor.investidor_id);
+      if (!activeClientIdsByInvestor.has(investorId)) activeClientIdsByInvestor.set(investorId, new Set());
+      activeClientIdsByInvestor.get(investorId)!.add(String(client.cliente_id));
+    }
     return [[
       functionById.get(String(investor?.funcao_id)) || "Função não definida",
       investor?.nome || "Sem responsável",
@@ -428,6 +434,21 @@ Deno.serve(async (request) => {
       investor.investidor_id,
       capacityByInvestorId.get(String(investor.investidor_id)) ?? null,
     ]];
+  });
+  const investorCapacityRows = investidores.map((investor) => {
+    const investorId = String(investor.investidor_id);
+    const capacidade = capacityByInvestorId.get(investorId) ?? null;
+    const clientesAtivos = activeClientIdsByInvestor.get(investorId)?.size ?? 0;
+    return {
+      id: investor.investidor_id,
+      nome: investor.nome || "Sem responsável",
+      squad: squadById.get(String(investor.squad_id)) || "Indefinido",
+      funcao: functionById.get(String(investor.funcao_id)) || "Função não definida",
+      ativo: Boolean(investor.ativo),
+      clientesAtivos,
+      capacidade,
+      ocupacao: capacidade && capacidade > 0 ? Number(((clientesAtivos / capacidade) * 100).toFixed(1)) : null,
+    };
   });
   const demandGoals = metaDemandas.map((row) => {
     const client = clientById.get(String(row.cliente_id));
@@ -460,6 +481,7 @@ Deno.serve(async (request) => {
     owners,
     clients,
     teamRows,
+    investorCapacityRows,
     services,
     demandGoals,
   });
