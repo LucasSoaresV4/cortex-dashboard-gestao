@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Cell,
   ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis
@@ -8,7 +8,7 @@ import {
 import {
   AlertTriangle, ArrowDownRight, ArrowUpRight, BriefcaseBusiness, ChevronLeft,
   ChevronRight, CircleDollarSign, Download, Filter, Gauge, LayoutDashboard, PanelLeftClose, PanelLeftOpen, Search,
-  ShieldCheck, Target, TrendingUp, UserRoundCog, Users, X
+  KeyRound, Pencil, Plus, Save, ShieldCheck, Target, Trash2, TrendingUp, UserRoundCog, Users, WalletCards, X
 } from "lucide-react";
 import snapshotTeamRows from "./team-data";
 
@@ -97,6 +97,15 @@ export default function Dashboard(){
   const [capacityInvestor,setCapacityInvestor]=useState("Todos");
   const [capacityInvestorStatus,setCapacityInvestorStatus]=useState("Ativos");
   const [capacityDimension,setCapacityDimension]=useState("squad");
+  const [remuneracoes,setRemuneracoes]=useState([]);
+  const [remuneracaoInvestidores,setRemuneracaoInvestidores]=useState([]);
+  const [remuneracaoLoading,setRemuneracaoLoading]=useState(false);
+  const [remuneracaoSaving,setRemuneracaoSaving]=useState(false);
+  const [remuneracaoError,setRemuneracaoError]=useState("");
+  const [remuneracaoSearch,setRemuneracaoSearch]=useState("");
+  const [remuneracaoToken,setRemuneracaoToken]=useState(()=>typeof window==="undefined"?"":sessionStorage.getItem("tfhub-remuneracao-token")||"");
+  const [editingRemuneracaoId,setEditingRemuneracaoId]=useState(null);
+  const [remuneracaoForm,setRemuneracaoForm]=useState({investidor_id:"",remuneracao:"",data_inicio_vigencia:"",data_fim_vigencia:""});
   const pageSize=8;
   const monthly=liveData?.monthly||snapshotMonthly;
   const clients=liveData?.clients||snapshotClients;
@@ -298,6 +307,39 @@ export default function Dashboard(){
     const blob=new Blob(["\ufeff"+[cols,...rows].map(r=>r.map(v=>`"${String(v??"").replaceAll('"','""')}"`).join(";")).join("\n")],{type:"text/csv;charset=utf-8"});
     const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`tfhub-equipe-${teamFunction.toLowerCase().replaceAll(" ","-")}.csv`;a.click();URL.revokeObjectURL(a.href);
   };
+  const remunerationHeaders=useCallback(()=>remuneracaoToken?{"x-remuneracao-admin-token":remuneracaoToken}:{},[remuneracaoToken]);
+  const loadRemuneracoes=useCallback(async()=>{
+    setRemuneracaoLoading(true);setRemuneracaoError("");
+    try{
+      const response=await fetch("/api/remuneracoes",{cache:"no-store",headers:remunerationHeaders()});
+      const payload=await response.json();
+      if(!response.ok)throw new Error(payload.error||"Não foi possível carregar as remunerações.");
+      setRemuneracoes(payload.remuneracoes||[]);setRemuneracaoInvestidores(payload.investidores||[]);
+      if(remuneracaoToken)sessionStorage.setItem("tfhub-remuneracao-token",remuneracaoToken);
+    }catch(error){setRemuneracaoError(error.message)}finally{setRemuneracaoLoading(false)}
+  },[remuneracaoToken,remunerationHeaders]);
+  const resetRemuneracaoForm=()=>{setEditingRemuneracaoId(null);setRemuneracaoForm({investidor_id:"",remuneracao:"",data_inicio_vigencia:"",data_fim_vigencia:""})};
+  const saveRemuneracao=async event=>{
+    event.preventDefault();setRemuneracaoSaving(true);setRemuneracaoError("");
+    try{
+      const endpoint=editingRemuneracaoId?`/api/remuneracoes?id=${editingRemuneracaoId}`:"/api/remuneracoes";
+      const response=await fetch(endpoint,{method:editingRemuneracaoId?"PATCH":"POST",headers:{"Content-Type":"application/json",...remunerationHeaders()},body:JSON.stringify(remuneracaoForm)});
+      const payload=await response.json();
+      if(!response.ok)throw new Error(payload.error||"Não foi possível salvar a remuneração.");
+      resetRemuneracaoForm();await loadRemuneracoes();
+    }catch(error){setRemuneracaoError(error.message)}finally{setRemuneracaoSaving(false)}
+  };
+  const editRemuneracao=row=>{setEditingRemuneracaoId(row.id);setRemuneracaoForm({investidor_id:String(row.investidor_id),remuneracao:String(row.remuneracao),data_inicio_vigencia:row.data_inicio_vigencia,data_fim_vigencia:row.data_fim_vigencia||""});window.scrollTo({top:0,behavior:"smooth"})};
+  const deleteRemuneracao=async row=>{
+    if(!window.confirm(`Excluir a remuneração de ${row.investidor_nome}?`))return;
+    setRemuneracaoSaving(true);setRemuneracaoError("");
+    try{const response=await fetch(`/api/remuneracoes?id=${row.id}`,{method:"DELETE",headers:remunerationHeaders()});const payload=await response.json();if(!response.ok)throw new Error(payload.error||"Não foi possível excluir a remuneração.");if(editingRemuneracaoId===row.id)resetRemuneracaoForm();await loadRemuneracoes()}catch(error){setRemuneracaoError(error.message)}finally{setRemuneracaoSaving(false)}
+  };
+  const visibleRemuneracoes=useMemo(()=>remuneracoes.filter(row=>row.investidor_nome.toLowerCase().includes(remuneracaoSearch.toLowerCase())),[remuneracoes,remuneracaoSearch]);
+  const vigenciaStatus=row=>{const today=new Date().toISOString().slice(0,10);return row.data_inicio_vigencia>today?["Futura","future"]:row.data_fim_vigencia&&row.data_fim_vigencia<today?["Encerrada","off"]:["Vigente","on"]};
+  const dateBr=value=>value?new Date(`${value}T12:00:00`).toLocaleDateString("pt-BR"):"Sem término";
+  const remuneracaoAtual=useMemo(()=>{const today=new Date().toISOString().slice(0,10);return remuneracoes.filter(row=>row.data_inicio_vigencia<=today&&(!row.data_fim_vigencia||row.data_fim_vigencia>=today))},[remuneracoes]);
+  const folhaAtual=remuneracaoAtual.reduce((sum,row)=>sum+Number(row.remuneracao||0),0);
   return <main className={sidebarCollapsed?"sidebar-collapsed":""}>
     <aside className="sidebar">
       <div className="brand"><span>V4</span><div><b>TF HUB</b><small>GESTÃO DE CARTEIRA</small></div><button className="sidebar-toggle" type="button" aria-label={sidebarCollapsed?"Expandir menu lateral":"Recolher menu lateral"} title={sidebarCollapsed?"Expandir menu":"Recolher menu"} onClick={()=>setSidebarCollapsed(value=>!value)}>{sidebarCollapsed?<PanelLeftOpen/>:<PanelLeftClose/>}</button></div>
@@ -307,12 +349,13 @@ export default function Dashboard(){
         <button className={tab==="capacity"?"active":""} onClick={()=>setTab("capacity")}><Gauge/>Capacity</button>
         <button className={tab==="squads"?"active":""} onClick={()=>setTab("squads")}><Users/>Clientes por squad</button>
         <button className={tab==="metas"?"active":""} onClick={()=>setTab("metas")}><Target/>Metas de demandas</button>
+        <button className={tab==="remuneracoes"?"active":""} onClick={()=>{setTab("remuneracoes");loadRemuneracoes()}}><WalletCards/>Remunerações</button>
       </nav>
       <div className="security"><ShieldCheck/><div><b>Conexão protegida</b><small>Sem PII ou credenciais</small></div></div>
     </aside>
     <section className="content">
       <header>
-        <div><p>PERFORMANCE & OPERAÇÕES</p><h1>{tab==="visao"?"Visão consolidada":tab==="capacity"?"Capacity dos investidores":tab==="squads"?"Clientes por squad":tab==="metas"?"Resultados vs. metas":"Clientes por responsável e função"}</h1></div>
+        <div><p>PERFORMANCE & OPERAÇÕES</p><h1>{tab==="visao"?"Visão consolidada":tab==="capacity"?"Capacity dos investidores":tab==="squads"?"Clientes por squad":tab==="metas"?"Resultados vs. metas":tab==="remuneracoes"?"Remuneração dos investidores":"Clientes por responsável e função"}</h1></div>
         <div className="header-actions"><div className="snapshot"><i/>{refreshing?"Atualizando…":`Atualizado • ${snapshotLabel}`}</div><div className="avatar">TF</div></div>
       </header>
       <div className="snapshot-note"><ShieldCheck size={16}/><b>Dados dinâmicos:</b> esta tela consulta automaticamente a nova base ao abrir e atualiza a cada minuto.</div>
@@ -480,6 +523,35 @@ export default function Dashboard(){
           <div className="filters"><label className="filter-field search-field"><span>Buscar</span><div className="filter-input"><Search size={16}/><input value={squadClientSearch} onChange={event=>{setSquadClientSearch(event.target.value);setSquadPage(1)}} placeholder="Cliente ou responsável..."/></div></label><label className="filter-field"><span>Status do cliente</span><select aria-label="Filtrar clientes por status" value={squadClientStatus} onChange={event=>{setSquadClientStatus(event.target.value);setSquadPage(1)}}><option value="Todos">Todos os clientes</option><option value="Ativos">Clientes ativos</option><option value="Inativos">Clientes inativos</option></select></label>{(squadDetail!=="Todos"||squadClientStatus!=="Todos"||squadClientSearch)&&<button className="clear" onClick={()=>{setSquadDetail("Todos");setSquadClientStatus("Todos");setSquadClientSearch("");setSquadPage(1)}}><X size={14}/>Limpar</button>}</div>
           <div className="table-wrap"><table><thead><tr><th>Cliente</th><th>Squad</th><th>Responsável</th><th>Status</th><th>MRR</th><th>Oneshot</th><th>Contratos vigentes</th></tr></thead><tbody>{squadClientRows.map(client=><tr key={client.id}><td><b>{client.nome}</b><small>Entrada {client.entrada}</small></td><td>{client.squad}</td><td>{client.responsavel}</td><td><span className={`badge ${client.ativo?"on":"off"}`}>{client.ativo?"Ativo":"Churn"}</span></td><td>{money(client.mrr)}</td><td>{money(client.oneshot)}</td><td>{client.contratos}</td></tr>)}</tbody></table></div>
           <div className="pagination"><span>Exibindo {squadClientRows.length} de {filteredSquadClients.length} clientes</span><div><button disabled={visibleSquadPage<=1} onClick={()=>setSquadPage(value=>value-1)}><ChevronLeft/></button><b>{visibleSquadPage} / {squadPages}</b><button disabled={visibleSquadPage>=squadPages} onClick={()=>setSquadPage(value=>value+1)}><ChevronRight/></button></div></div>
+        </article>
+      </>}
+
+      {tab==="remuneracoes"&&<>
+        <section className="kpis compact-kpis remuneration-kpis">
+          <Kpi label="Remunerações vigentes" value={remuneracaoAtual.length} detail="registros válidos na data atual" icon={WalletCards} tone="positive"/>
+          <Kpi label="Investidores remunerados" value={new Set(remuneracaoAtual.map(row=>row.investidor_id)).size} detail={`${remuneracaoInvestidores.length} investidores disponíveis`} icon={Users}/>
+          <Kpi label="Folha mensal vigente" value={money(folhaAtual)} detail="soma das remunerações vigentes" icon={CircleDollarSign} tone="warning"/>
+        </section>
+        <div className="sensitive-note"><ShieldCheck size={16}/><div><b>Dados financeiros restritos</b><span>Os valores são consultados somente por uma rota protegida no servidor e não integram os demais dashboards.</span></div></div>
+        {remuneracaoError&&<div className="snapshot-note error-note remuneration-error"><AlertTriangle size={16}/><b>Não foi possível concluir:</b> {remuneracaoError}</div>}
+        {remuneracaoError.toLowerCase().includes("acesso")&&<article className="panel access-panel"><div className="panel-title"><div><small>ACESSO ADMINISTRATIVO</small><h2>Informe o token configurado no ambiente</h2></div><KeyRound/></div><label className="filter-field"><span>Token administrativo</span><input type="password" value={remuneracaoToken} onChange={event=>setRemuneracaoToken(event.target.value)} placeholder="REMUNERACAO_ADMIN_TOKEN"/></label><button className="primary-action" onClick={loadRemuneracoes}><KeyRound size={15}/>Validar acesso</button></article>}
+        <article className="panel remuneration-form-panel">
+          <div className="panel-title"><div><small>{editingRemuneracaoId?"EDITAR REMUNERAÇÃO":"NOVA REMUNERAÇÃO"}</small><h2>{editingRemuneracaoId?"Atualize a vigência e o valor":"Cadastre uma remuneração"}</h2></div>{editingRemuneracaoId&&<span>Registro #{editingRemuneracaoId}</span>}</div>
+          <form className="remuneration-form" onSubmit={saveRemuneracao}>
+            <div className="remuneration-form-grid">
+              <label className="filter-field"><span>Investidor</span><select required value={remuneracaoForm.investidor_id} onChange={event=>setRemuneracaoForm(form=>({...form,investidor_id:event.target.value}))}><option value="">Selecione um investidor</option>{remuneracaoInvestidores.map(item=><option key={item.investidor_id} value={item.investidor_id}>{item.nome}{item.ativo===false?" · Inativo":""}</option>)}</select></label>
+              <label className="filter-field"><span>Remuneração mensal</span><input required type="number" min="0" step="0.01" value={remuneracaoForm.remuneracao} onChange={event=>setRemuneracaoForm(form=>({...form,remuneracao:event.target.value}))} placeholder="0,00"/></label>
+              <label className="filter-field"><span>Início da vigência</span><input required type="date" value={remuneracaoForm.data_inicio_vigencia} onChange={event=>setRemuneracaoForm(form=>({...form,data_inicio_vigencia:event.target.value}))}/></label>
+              <label className="filter-field"><span>Fim da vigência (opcional)</span><input type="date" min={remuneracaoForm.data_inicio_vigencia||undefined} value={remuneracaoForm.data_fim_vigencia} onChange={event=>setRemuneracaoForm(form=>({...form,data_fim_vigencia:event.target.value}))}/></label>
+            </div>
+            <div className="remuneration-actions"><button type="submit" className="primary-action" disabled={remuneracaoSaving||remuneracaoLoading}>{editingRemuneracaoId?<Save size={15}/>:<Plus size={15}/>} {remuneracaoSaving?"Salvando…":editingRemuneracaoId?"Salvar alterações":"Cadastrar remuneração"}</button>{editingRemuneracaoId&&<button type="button" className="secondary-action" onClick={resetRemuneracaoForm}><X size={15}/>Cancelar edição</button>}</div>
+          </form>
+        </article>
+        <article className="panel table-panel remuneration-table-panel">
+          <div className="table-title"><div><small>HISTÓRICO DE VIGÊNCIAS</small><h2>Remunerações cadastradas</h2></div><span className="service-count">{visibleRemuneracoes.length} registros</span></div>
+          <div className="filters"><label className="filter-field search-field"><span>Buscar investidor</span><div className="filter-input"><Search size={16}/><input value={remuneracaoSearch} onChange={event=>setRemuneracaoSearch(event.target.value)} placeholder="Nome do investidor..."/></div></label>{remuneracaoSearch&&<button className="clear" onClick={()=>setRemuneracaoSearch("")}><X size={14}/>Limpar busca</button>}</div>
+          <div className="table-wrap"><table className="remuneration-table"><thead><tr><th>Investidor</th><th>Remuneração</th><th>Início</th><th>Fim</th><th>Status</th><th>Ações</th></tr></thead><tbody>{visibleRemuneracoes.map(row=>{const [label,tone]=vigenciaStatus(row);return <tr key={row.id}><td><b>{row.investidor_nome}</b><small>ID {row.investidor_id}</small></td><td className="remuneration-value">{money(Number(row.remuneracao))}</td><td>{dateBr(row.data_inicio_vigencia)}</td><td>{dateBr(row.data_fim_vigencia)}</td><td><span className={`badge ${tone}`}>{label}</span></td><td><div className="row-actions"><button aria-label={`Editar remuneração de ${row.investidor_nome}`} title="Editar" onClick={()=>editRemuneracao(row)}><Pencil size={14}/></button><button className="danger-action" aria-label={`Excluir remuneração de ${row.investidor_nome}`} title="Excluir" disabled={remuneracaoSaving} onClick={()=>deleteRemuneracao(row)}><Trash2 size={14}/></button></div></td></tr>})}</tbody></table></div>
+          {remuneracaoLoading&&<div className="empty-state">Carregando remunerações…</div>}{!remuneracaoLoading&&!visibleRemuneracoes.length&&<div className="empty-state">Nenhuma remuneração encontrada.</div>}
         </article>
       </>}
 
