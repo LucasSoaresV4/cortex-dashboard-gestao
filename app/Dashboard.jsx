@@ -8,9 +8,10 @@ import {
 import {
   AlertTriangle, ArrowDownRight, ArrowUpRight, BriefcaseBusiness, ChevronLeft,
   ChevronRight, CircleDollarSign, Download, Filter, Gauge, LayoutDashboard, PanelLeftClose, PanelLeftOpen, Search,
-  KeyRound, Pencil, Plus, Save, ShieldCheck, Target, Trash2, TrendingUp, UserRoundCog, Users, WalletCards, X
+  KeyRound, Landmark, Pencil, Plus, Save, ShieldCheck, Target, Trash2, TrendingUp, UserRoundCog, Users, WalletCards, X
 } from "lucide-react";
 import snapshotTeamRows from "./team-data";
+import Economics from "./Economics";
 
 const RED = "#ef233c";
 const GOAL_DIMENSIONS={squad:["Squad","squad"],account:["Account","account"],gestorTrafego:["Gestor de tráfego","gestorTrafego"],designer:["Designer","designer"],semana:["Semana","semana"],mes:["Mês","mes"]};
@@ -67,7 +68,7 @@ export default function Dashboard(){
   const [dataError,setDataError]=useState("");
   const [refreshing,setRefreshing]=useState(true);
   const [tab,setTab]=useState("visao");
-  const [sidebarCollapsed,setSidebarCollapsed]=useState(false);
+  const [sidebarCollapsed,setSidebarCollapsed]=useState(true);
   const [period,setPeriod]=useState(12);
   const [squad,setSquad]=useState("Todos");
   const [search,setSearch]=useState("");
@@ -350,12 +351,13 @@ export default function Dashboard(){
         <button className={tab==="squads"?"active":""} onClick={()=>setTab("squads")}><Users/>Clientes por squad</button>
         <button className={tab==="metas"?"active":""} onClick={()=>setTab("metas")}><Target/>Metas de demandas</button>
         <button className={tab==="remuneracoes"?"active":""} onClick={()=>{setTab("remuneracoes");loadRemuneracoes()}}><WalletCards/>Remunerações</button>
+        <button className={tab==="economics"?"active":""} onClick={()=>setTab("economics")}><Landmark/>Economics</button>
       </nav>
       <div className="security"><ShieldCheck/><div><b>Conexão protegida</b><small>Sem PII ou credenciais</small></div></div>
     </aside>
     <section className="content">
       <header>
-        <div><p>PERFORMANCE & OPERAÇÕES</p><h1>{tab==="visao"?"Visão consolidada":tab==="capacity"?"Capacity dos investidores":tab==="squads"?"Clientes por squad":tab==="metas"?"Resultados vs. metas":tab==="remuneracoes"?"Remuneração dos investidores":"Clientes por responsável e função"}</h1></div>
+        <div><p>PERFORMANCE & OPERAÇÕES</p><h1>{tab==="visao"?"Visão consolidada":tab==="capacity"?"Capacity dos investidores":tab==="squads"?"Clientes por squad":tab==="metas"?"Resultados vs. metas":tab==="remuneracoes"?"Remuneração dos investidores":tab==="economics"?"Economics":"Clientes por responsável e função"}</h1></div>
         <div className="header-actions"><div className="snapshot"><i/>{refreshing?"Atualizando…":`Atualizado • ${snapshotLabel}`}</div><div className="avatar">TF</div></div>
       </header>
       <div className="snapshot-note"><ShieldCheck size={16}/><b>Dados dinâmicos:</b> esta tela consulta automaticamente a nova base ao abrir e atualiza a cada minuto.</div>
@@ -554,6 +556,8 @@ export default function Dashboard(){
           {remuneracaoLoading&&<div className="empty-state">Carregando remunerações…</div>}{!remuneracaoLoading&&!visibleRemuneracoes.length&&<div className="empty-state">Nenhuma remuneração encontrada.</div>}
         </article>
       </>}
+
+      {tab==="economics"&&<Economics/>}
 
       {tab==="visao"&&<article className="panel table-panel" id="carteira">
         <div className="table-title"><div><small>CLIENTES × CONTRATOS</small><h2>Carteira consolidada</h2></div><button className="export" onClick={csv}><Download size={16}/>Exportar CSV</button></div>
