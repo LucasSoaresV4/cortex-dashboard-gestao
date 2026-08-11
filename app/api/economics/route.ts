@@ -28,7 +28,9 @@ function denied(request: Request) {
 export async function GET(request: Request) {
   const access = denied(request); if (access) return access;
   const env = config(); if (!env) return json({ error: "Integração não configurada" }, 503);
-  try { return json(await getEconomicsData(env)); }
+  const period = new URL(request.url).searchParams.get("period") || undefined;
+  if (period && !/^\d{4}-(0[1-9]|1[0-2])$/.test(period)) return json({ error: "Período inválido" }, 400);
+  try { return json(await getEconomicsData(env, period)); }
   catch (error) { console.error("Economics query failed", error); return json({ error: "Não foi possível calcular os indicadores de Economics" }, 502); }
 }
 
@@ -46,4 +48,3 @@ export async function PATCH(request: Request) {
     return json({ config: (await response.json())[0] });
   } catch (error) { console.error("Economics config update failed", error); return json({ error: "Não foi possível salvar os parâmetros do Economics. Confirme se a migration foi aplicada." }, 502); }
 }
-
