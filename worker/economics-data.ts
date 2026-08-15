@@ -64,7 +64,7 @@ function overlapsMonth(row: Row, startField: string, endField: string, start: Da
   return (!rowStart || rowStart <= end) && (!rowEnd || rowEnd >= start);
 }
 
-export async function getEconomicsData(env: DatabaseEnv, requestedPeriod?: string) {
+async function loadEconomicsSource(env: DatabaseEnv) {
   const [clientes, contratos, investidores, equipe, contratoEquipe, planos, contratoPlanos, servicos, squads, funcoes, remuneracoes, configRows] = await Promise.all([
     fetchTable(env, "clientes", "cliente_id,nome,ativo,data_entrada,data_churn,squad_responsavel_id"),
     fetchTable(env, "contratos", "contrato_id,cliente_id,fee_mensal,valor_bookado,meses,data_assinatura,data_contrato,data_fim_contrato,ativo"),
@@ -80,6 +80,13 @@ export async function getEconomicsData(env: DatabaseEnv, requestedPeriod?: strin
     fetchTable(env, "economics_config", "*", true),
   ]);
 
+  return { clientes, contratos, investidores, equipe, contratoEquipe, planos, contratoPlanos, servicos, squads, funcoes, remuneracoes, configRows };
+}
+
+type EconomicsSource = Awaited<ReturnType<typeof loadEconomicsSource>>;
+
+function calculateEconomicsData(source: EconomicsSource, requestedPeriod?: string) {
+  const { clientes, contratos, investidores, equipe, contratoEquipe, planos, contratoPlanos, servicos, squads, funcoes, remuneracoes, configRows } = source;
   const config = Object.fromEntries(Object.entries({ ...DEFAULT_ECONOMICS_CONFIG, ...(configRows[0] || {}) }).map(([key, value]) => [key, key === "id" || key === "updated_at" ? value : number(value)])) as EconomicsConfig;
   const today = new Date();
   const currentPeriod = `${today.getUTCFullYear()}-${String(today.getUTCMonth() + 1).padStart(2, "0")}`;
@@ -220,7 +227,12 @@ export async function getEconomicsData(env: DatabaseEnv, requestedPeriod?: strin
   const nrr = previousTotal ? retainedCurrent / previousTotal : 0;
   const previousNrrRows = revenueRowsInMonth(previousStart, previousEnd);
   const currentNrrRows = revenueRowsInMonth(periodStart, periodEnd);
-  const nrrRows = [...new Set([...previousNrrRows.keys(), ...currentNrrRows.keys()])].map(clientId => ({ clientId, previous: previousNrrRows.get(clientId) || [], current: currentNrrRows.get(clientId) || [] }));
+  const nrrRows = [...new Set([...previousNrrRows.keys(), ...currentNrrRows.keys()])].map(clientId => ({
+    clientId,
+    squad: squadById.get(String(clientById.get(clientId)?.squad_responsavel_id)) || "Indefinido",
+    previous: previousNrrRows.get(clientId) || [],
+    current: currentNrrRows.get(clientId) || [],
+  }));
   const serviceSquads = new Map<string, Set<string>>();
   for (const row of clientRows) for (const contract of row.revenueContracts) for (const serviceId of contract.serviceIds) {
     if (!serviceSquads.has(serviceId)) serviceSquads.set(serviceId, new Set());
@@ -230,4 +242,13 @@ export async function getEconomicsData(env: DatabaseEnv, requestedPeriod?: strin
   const availableYears = [...new Set(contratos.map(row => date(row.data_contrato)?.getUTCFullYear()).filter((value): value is number => Boolean(value)))].sort((a, b) => b - a);
 
   return { period, availableYears, config, clientRows, peopleRows, serviceRows, nrr, nrrRows, coverage: { allocations: validPairs.size, remuneratedPeople: periodRemuneration.size, clientsWithoutAllocation: clientRows.filter(row => !row.people).length }, extractedAt: new Date().toISOString() };
+}
+
+export async function getEconomicsData(env: DatabaseEnv, requestedPeriod?: string) {
+  return calculateEconomicsData(await loadEconomicsSource(env), requestedPeriod);
+}
+
+export async function getEconomicsYearData(env: DatabaseEnv, year: number) {
+  const source = await loadEconomicsSource(env);
+  return Array.from({ length: 12 }, (_, index) => calculateEconomicsData(source, `${year}-${String(index + 1).padStart(2, "0")}`));
 }
