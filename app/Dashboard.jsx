@@ -8,10 +8,11 @@ import {
 import {
   AlertTriangle, ArrowDownRight, ArrowUpRight, BriefcaseBusiness, ChevronLeft,
   ChevronRight, CircleDollarSign, Download, Filter, Gauge, LayoutDashboard, PanelLeftClose, PanelLeftOpen, Search,
-  KeyRound, Landmark, Pencil, Plus, Save, ShieldCheck, Target, Trash2, TrendingUp, UserRoundCog, Users, WalletCards, X
+  KeyRound, Landmark, Pencil, Plus, Save, ShieldCheck, Target, Trash2, TrendingUp, UserRoundCog, Users, WalletCards, Waypoints, X
 } from "lucide-react";
 import snapshotTeamRows from "./team-data";
 import Economics from "./Economics";
+import CustomerJourney from "./CustomerJourney";
 
 const RED = "#ef233c";
 const GOAL_DIMENSIONS={squad:["Squad","squad"],account:["Account","account"],gestorTrafego:["Gestor de tráfego","gestorTrafego"],designer:["Designer","designer"],semana:["Semana","semana"],mes:["Mês","mes"]};
@@ -349,6 +350,7 @@ export default function Dashboard(){
         <button className={tab==="equipe"?"active":""} onClick={()=>setTab("equipe")}><UserRoundCog/>Clientes por função</button>
         <button className={tab==="capacity"?"active":""} onClick={()=>setTab("capacity")}><Gauge/>Capacity</button>
         <button className={tab==="squads"?"active":""} onClick={()=>setTab("squads")}><Users/>Clientes por squad</button>
+        <button className={tab==="jornada"?"active":""} onClick={()=>setTab("jornada")}><Waypoints/>Jornada do cliente</button>
         <button className={tab==="metas"?"active":""} onClick={()=>setTab("metas")}><Target/>Metas de demandas</button>
         <button className={tab==="remuneracoes"?"active":""} onClick={()=>{setTab("remuneracoes");loadRemuneracoes()}}><WalletCards/>Remunerações</button>
         <button className={tab==="economics"?"active":""} onClick={()=>setTab("economics")}><Landmark/>Economics</button>
@@ -357,7 +359,7 @@ export default function Dashboard(){
     </aside>
     <section className="content">
       <header>
-        <div><p>PERFORMANCE & OPERAÇÕES</p><h1>{tab==="visao"?"Visão consolidada":tab==="capacity"?"Capacity dos investidores":tab==="squads"?"Clientes por squad":tab==="metas"?"Resultados vs. metas":tab==="remuneracoes"?"Remuneração dos investidores":tab==="economics"?"Economics":"Clientes por responsável e função"}</h1></div>
+        <div><p>PERFORMANCE & OPERAÇÕES</p><h1>{tab==="visao"?"Visão consolidada":tab==="capacity"?"Capacity dos investidores":tab==="squads"?"Clientes por squad":tab==="jornada"?"Jornada do cliente":tab==="metas"?"Resultados vs. metas":tab==="remuneracoes"?"Remuneração dos investidores":tab==="economics"?"Economics":"Clientes por responsável e função"}</h1></div>
         <div className="header-actions"><div className="snapshot"><i/>{refreshing?"Atualizando…":`Atualizado • ${snapshotLabel}`}</div><div className="avatar">TF</div></div>
       </header>
       <div className="snapshot-note"><ShieldCheck size={16}/><b>Dados dinâmicos:</b> esta tela consulta automaticamente a nova base ao abrir e atualiza a cada minuto.</div>
@@ -558,11 +560,12 @@ export default function Dashboard(){
       </>}
 
       {tab==="economics"&&<Economics/>}
+      {tab==="jornada"&&<CustomerJourney clients={clients}/>}
 
       {tab==="visao"&&<article className="panel table-panel" id="carteira">
         <div className="table-title"><div><small>CLIENTES × CONTRATOS</small><h2>Carteira consolidada</h2></div><button className="export" onClick={csv}><Download size={16}/>Exportar CSV</button></div>
         <div className="filters"><label className="filter-field search-field"><span>Buscar</span><div className="filter-input"><Search size={16}/><input value={search} onChange={e=>{setSearch(e.target.value);setPage(1)}} placeholder="Cliente ou responsável..."/></div></label>{search&&<button className="clear" onClick={()=>{setSearch("");setPage(1)}}><X size={14}/>Limpar busca</button>}</div>
-        <div className="table-wrap"><table><thead><tr><th>Cliente</th><th>Status</th><th>Squad / responsável</th><th>MRR</th><th>Oneshot</th><th>LTV aprox.</th><th>Contratos</th><th>Entrada</th></tr></thead><tbody>{pageRows.map(c=><tr key={c.id} className={c.ativo&&c.contratos===0?"flagged":""}><td><b>{c.nome}</b><small>Segmento {c.segmento??"—"} · Origem {c.origem??"—"}</small></td><td><span className={`badge ${c.ativo?"on":"off"}`}>{c.ativo?"Ativo":"Churn"}</span>{c.ativo&&c.contratos===0&&<span className="warning-tag">Sem contrato</span>}</td><td><b>{c.squad}</b><small>{c.responsavel}</small></td><td>{money(c.mrr)}</td><td>{money(c.oneshot)}</td><td>{money(c.ltv)}</td><td>{c.contratos}</td><td>{c.entrada}</td></tr>)}</tbody></table></div>
+        <div className="table-wrap"><table><thead><tr><th>Cliente</th><th>Status</th><th>Squad / responsável</th><th>MRR</th><th>Oneshot</th><th>LTV aprox.</th><th>Contratos</th><th>Entrada</th><th>Data de churn</th></tr></thead><tbody>{pageRows.map(c=><tr key={c.id} className={c.ativo&&c.contratos===0?"flagged":""}><td><b>{c.nome}</b><small>Segmento {c.segmento??"—"} · Origem {c.origem??"—"}</small></td><td><span className={`badge ${c.ativo?"on":"off"}`}>{c.ativo?"Ativo":"Churn"}</span>{c.ativo&&c.contratos===0&&<span className="warning-tag">Sem contrato</span>}</td><td><b>{c.squad}</b><small>{c.responsavel}</small></td><td>{money(c.mrr)}</td><td>{money(c.oneshot)}</td><td>{money(c.ltv)}</td><td>{c.contratos}</td><td>{c.entrada}</td><td>{c.churn||"—"}</td></tr>)}</tbody></table></div>
         <div className="pagination"><span>Exibindo {pageRows.length} de {filtered.length} registros filtrados</span><div><button disabled={page<=1} onClick={()=>setPage(p=>p-1)}><ChevronLeft/></button><b>{Math.min(page,pages)} / {pages}</b><button disabled={page>=pages} onClick={()=>setPage(p=>p+1)}><ChevronRight/></button></div></div>
       </article>}
       <footer><span>TF Hub • Gestão de carteira</span><span><Filter size={13}/> Segmentos resolvidos por nome; origens continuam por ID.</span></footer>

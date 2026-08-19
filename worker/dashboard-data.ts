@@ -199,6 +199,10 @@ export async function getDashboardData(env: DatabaseEnv) {
         (sum, contract) => sum + oneShotValue(contract),
         0,
       );
+      const receita = clientContracts.reduce(
+        (sum, contract) => sum + recurringValue(contract),
+        0,
+      );
       const ltv = clientContracts.reduce(
         (sum, contract) =>
           sum +
@@ -216,6 +220,7 @@ export async function getDashboardData(env: DatabaseEnv) {
         ativo: Boolean(client.ativo),
         gmv: number(client.gmv),
         mrr,
+        receita,
         oneshot,
         ltv,
         contratos: activeContracts.length,
@@ -224,6 +229,9 @@ export async function getDashboardData(env: DatabaseEnv) {
           (client.segmento_id ? `#${client.segmento_id}` : "—"),
         origem: client.origem_id ? `#${client.origem_id}` : "—",
         entrada: formatBr(client.data_entrada),
+        churn: formatBr(client.data_churn),
+        dataEntrada: client.data_entrada || null,
+        dataChurn: client.data_churn || null,
         entradaMes: monthKey(client.data_entrada),
         churnMes: monthKey(client.data_churn),
       };
