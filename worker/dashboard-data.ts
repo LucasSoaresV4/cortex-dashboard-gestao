@@ -185,6 +185,23 @@ export async function getDashboardData(env: DatabaseEnv) {
       contractsByClient.get(key)!.push(contract);
     }
 
+    const serviceIdByPlanId = new Map(
+      planos.map((plan) => [String(plan.plano_id), String(plan.servico_id)]),
+    );
+    const serviceIdsByContractId = new Map<string, Set<string>>();
+    for (const link of contratoPlanos) {
+      const serviceId = serviceIdByPlanId.get(String(link.plano_id));
+      if (!serviceId) continue;
+      const contractId = String(link.contrato_id);
+      if (!serviceIdsByContractId.has(contractId)) serviceIdsByContractId.set(contractId, new Set());
+      serviceIdsByContractId.get(contractId)!.add(serviceId);
+    }
+    for (const assignment of contratoEquipe) {
+      const contractId = String(assignment.contrato_id);
+      if (!serviceIdsByContractId.has(contractId)) serviceIdsByContractId.set(contractId, new Set());
+      serviceIdsByContractId.get(contractId)!.add(String(assignment.servico_id));
+    }
+
     const clients = clientes.map((client) => {
       const clientContracts =
         contractsByClient.get(String(client.cliente_id)) ?? [];
@@ -211,6 +228,24 @@ export async function getDashboardData(env: DatabaseEnv) {
         0,
       );
       const investor = investorById.get(String(client.investidor_id));
+      const serviceContracts = clientContracts.map((contract) => ({
+        id: contract.contrato_id,
+        serviceIds: [...(serviceIdsByContractId.get(String(contract.contrato_id)) ?? [])],
+        services: [...(serviceIdsByContractId.get(String(contract.contrato_id)) ?? [])]
+          .map((id) => serviceById.get(String(id)))
+          .filter(Boolean),
+        active: isActiveContract(contract),
+        startDate: date(contract.data_contrato)?.toISOString().slice(0, 10) ?? null,
+        startMonth: monthKey(contract.data_contrato),
+        startLabel: formatBr(contract.data_contrato),
+        endDate: date(contract.data_fim_contrato)?.toISOString().slice(0, 10) ?? null,
+        endMonth: monthKey(contract.data_fim_contrato),
+        recurring: recurringValue(contract),
+        oneShot: oneShotValue(contract),
+        ltv:
+          number(contract.valor_contrato) +
+          number(contract.fee_mensal) * number(contract.meses),
+      }));
       return {
         id: client.cliente_id,
         nome: client.nome || "Cliente sem nome",
@@ -232,8 +267,11 @@ export async function getDashboardData(env: DatabaseEnv) {
         churn: formatBr(client.data_churn),
         dataEntrada: client.data_entrada || null,
         dataChurn: client.data_churn || null,
+        entradaData: date(client.data_entrada)?.toISOString().slice(0, 10) ?? null,
+        churnData: date(client.data_churn)?.toISOString().slice(0, 10) ?? null,
         entradaMes: monthKey(client.data_entrada),
         churnMes: monthKey(client.data_churn),
+        serviceContracts,
       };
     });
 
@@ -421,29 +459,6 @@ export async function getDashboardData(env: DatabaseEnv) {
       financials.recurring += recurringValue(contract);
       financials.oneShot += oneShotValue(contract);
       financialsByClientInvestorService.set(key, financials);
-    }
-
-    const serviceIdByPlanId = new Map(
-      planos.map((plan) => [String(plan.plano_id), String(plan.servico_id)]),
-    );
-    const serviceIdsByContractId = new Map<string, Set<string>>();
-    for (const link of contratoPlanos) {
-      const serviceId = serviceIdByPlanId.get(String(link.plano_id));
-      if (!serviceId) continue;
-      const contractId = String(link.contrato_id);
-      if (!serviceIdsByContractId.has(contractId)) {
-        serviceIdsByContractId.set(contractId, new Set());
-      }
-      serviceIdsByContractId.get(contractId)!.add(serviceId);
-    }
-    for (const assignment of contratoEquipe) {
-      const contractId = String(assignment.contrato_id);
-      if (!serviceIdsByContractId.has(contractId)) {
-        serviceIdsByContractId.set(contractId, new Set());
-      }
-      serviceIdsByContractId
-        .get(contractId)!
-        .add(String(assignment.servico_id));
     }
 
     const serviceMetricsById = new Map<

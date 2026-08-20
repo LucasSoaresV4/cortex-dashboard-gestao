@@ -87,6 +87,19 @@ function parseInput(input: RemuneracaoInput) {
   };
 }
 
+async function inputWithInvestorName(
+  config: { url: string; key: string },
+  input: ReturnType<typeof parseInput>,
+) {
+  const investors = (await supabaseRequest(
+    config,
+    `/rest/v1/investidores?select=nome&investidor_id=eq.${input.investidor_id}&limit=1`,
+  )) as Array<{ nome?: unknown }>;
+  const investorName = String(investors[0]?.nome ?? "").trim();
+  if (!investorName) throw new Error("Investidor não encontrado no banco de dados");
+  return { ...input, investidor_nome: investorName };
+}
+
 function requireAccess(request: Request) {
   if (isAuthorized(request)) return null;
   return json(
@@ -130,9 +143,10 @@ export async function POST(request: Request) {
 
   try {
     const input = parseInput((await request.json()) as RemuneracaoInput);
+    const payload = await inputWithInvestorName(config, input);
     const rows = await supabaseRequest(config, "/rest/v1/investidor_remuneracao", {
       method: "POST",
-      body: JSON.stringify(input),
+      body: JSON.stringify(payload),
     });
     return json({ remuneracao: rows[0] }, 201);
   } catch (error) {
@@ -153,10 +167,11 @@ export async function PATCH(request: Request) {
 
   try {
     const input = parseInput((await request.json()) as RemuneracaoInput);
+    const payload = await inputWithInvestorName(config, input);
     const rows = await supabaseRequest(
       config,
       `/rest/v1/investidor_remuneracao?id=eq.${id}`,
-      { method: "PATCH", body: JSON.stringify(input) },
+      { method: "PATCH", body: JSON.stringify(payload) },
     );
     if (!rows.length) return json({ error: "Registro não encontrado" }, 404);
     return json({ remuneracao: rows[0] });

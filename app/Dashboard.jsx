@@ -2,13 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Area, AreaChart, Bar, BarChart, CartesianGrid, Cell,
+  Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, LabelList,
   ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis
 } from "recharts";
 import {
-  AlertTriangle, ArrowDownRight, ArrowUpRight, BriefcaseBusiness, ChevronLeft,
-  ChevronRight, CircleDollarSign, Download, Filter, Gauge, LayoutDashboard, PanelLeftClose, PanelLeftOpen, Search,
-  KeyRound, Landmark, Pencil, Plus, Save, ShieldCheck, Target, Trash2, TrendingUp, UserRoundCog, Users, WalletCards, Waypoints, X
+  AlertTriangle, ArrowDownRight, ArrowUpRight, BriefcaseBusiness, CalendarDays, Check, ChevronDown, ChevronLeft,
+  ChevronRight, ChevronUp, CircleDollarSign, Download, Filter, Gauge, LayoutDashboard, PanelLeftClose, PanelLeftOpen, Search,
+  KeyRound, Landmark, Pencil, Plus, RefreshCw, Save, ShieldCheck, Target, Trash2, TrendingUp, UserRoundCog, Users, WalletCards, Waypoints, X
 } from "lucide-react";
 import snapshotTeamRows from "./team-data";
 import Economics from "./Economics";
@@ -67,13 +67,21 @@ function Kpi({label,value,detail,icon:Icon,tone="neutral"}) {
 export default function Dashboard(){
   const [liveData,setLiveData]=useState(null);
   const [dataError,setDataError]=useState("");
-  const [refreshing,setRefreshing]=useState(true);
+  const [refreshing,setRefreshing]=useState(false);
   const [tab,setTab]=useState("visao");
   const [sidebarCollapsed,setSidebarCollapsed]=useState(true);
   const [period,setPeriod]=useState(12);
   const [squad,setSquad]=useState("Todos");
   const [search,setSearch]=useState("");
   const [status,setStatus]=useState("Todos");
+  const [overviewClientEntryFrom,setOverviewClientEntryFrom]=useState("");
+  const [overviewClientEntryTo,setOverviewClientEntryTo]=useState("");
+  const [overviewContractFrom,setOverviewContractFrom]=useState("");
+  const [overviewContractTo,setOverviewContractTo]=useState("");
+  const [overviewChurnFrom,setOverviewChurnFrom]=useState("");
+  const [overviewChurnTo,setOverviewChurnTo]=useState("");
+  const [overviewServicePickerOpen,setOverviewServicePickerOpen]=useState(false);
+  const [overviewServiceSelections,setOverviewServiceSelections]=useState(null);
   const [page,setPage]=useState(1);
   const [teamFunction,setTeamFunction]=useState("Gestor de Tráfego");
   const [teamSearch,setTeamSearch]=useState("");
@@ -114,43 +122,25 @@ export default function Dashboard(){
   const teamRows=liveData?.teamRows||snapshotTeamRows;
   const demandGoals=useMemo(()=>liveData?.demandGoals||[],[liveData?.demandGoals]);
   const capacityRows=useMemo(()=>liveData?.investorCapacityRows||[],[liveData?.investorCapacityRows]);
+  const services=useMemo(()=>liveData?.services||[],[liveData?.services]);
   const extractedAt=liveData?.extractedAt;
-  useEffect(()=>{
-    let active=true;
-    const load=async()=>{
-      setRefreshing(true);
-      const controller=new AbortController();
-      const timeout=window.setTimeout(()=>controller.abort(),15000);
-      try{
-        const response=await fetch("/api/dashboard",{cache:"no-store",signal:controller.signal});
-        if(!response.ok) throw new Error("Falha ao consultar o TFHub");
-        const payload=await response.json();
-        if(active){setLiveData(payload);setDataError("");}
-      }catch{
-        if(active)setDataError("Não foi possível carregar os dados atuais. A última leitura disponível foi mantida.");
-      }finally{
-        window.clearTimeout(timeout);
-        if(active)setRefreshing(false);
-      }
-    };
-    load();
-    const refreshTimer=window.setInterval(load,60000);
-    return()=>{active=false;window.clearInterval(refreshTimer)};
-  },[]);
-  const filtered=useMemo(()=>clients.filter(c=>
-    (squad==="Todos"||c.squad===squad)&&
-    (status==="Todos"||(status==="Ativos"&&c.ativo)||(status==="Inativos"&&!c.ativo)||(status==="Sem contrato"&&c.ativo&&c.contratos===0))&&
-    `${c.nome} ${c.responsavel}`.toLowerCase().includes(search.toLowerCase())
-  ),[clients,squad,status,search]);
-  const pages=Math.max(1,Math.ceil(filtered.length/pageSize));
-  const pageRows=filtered.slice((Math.min(page,pages)-1)*pageSize,Math.min(page,pages)*pageSize);
-  const chooseSquad=name=>{setSquad(squad===name?"Todos":name);setPage(1);document.getElementById("carteira")?.scrollIntoView({behavior:"smooth"});};
-  const csv=()=>{
-    const cols=["Cliente","Squad","Responsável","Status","GMV","MRR","Oneshot","LTV aproximado","Contratos","Segmento ID","Origem ID","Entrada"];
-    const rows=filtered.map(c=>[c.nome,c.squad,c.responsavel,c.ativo?"Ativo":"Churn",c.gmv,c.mrr,c.oneshot,c.ltv,c.contratos,c.segmento,c.origem,c.entrada]);
-    const blob=new Blob(["\ufeff"+[cols,...rows].map(r=>r.map(v=>`"${String(v??"").replaceAll('"','""')}"`).join(";")).join("\n")],{type:"text/csv;charset=utf-8"});
-    const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="tfhub-clientes-filtrados.csv";a.click();URL.revokeObjectURL(a.href);
-  };
+  const loadDashboard=useCallback(async()=>{
+    if(refreshing)return;
+    setRefreshing(true);
+    const controller=new AbortController();
+    const timeout=window.setTimeout(()=>controller.abort(),15000);
+    try{
+      const response=await fetch("/api/dashboard",{cache:"no-store",signal:controller.signal});
+      if(!response.ok) throw new Error("Falha ao consultar o TFHub");
+      const payload=await response.json();
+      setLiveData(payload);setDataError("");
+    }catch{
+      setDataError("Não foi possível carregar os dados atuais. A última leitura disponível foi mantida.");
+    }finally{
+      window.clearTimeout(timeout);setRefreshing(false);
+    }
+  },[refreshing]);
+  useEffect(()=>{if(!liveData)loadDashboard()},[liveData,loadDashboard]);
   const team=useMemo(()=>teamRows.map(row=>{
     const [funcao,responsavel,squad,cliente,servico,fee]=row;
     const hasOneShot=row.length>=9;
@@ -272,10 +262,40 @@ export default function Dashboard(){
     filteredGoals.forEach(row=>{const month=`${row.ano}-${String(row.mes).padStart(2,"0")}`;const key=goalEvolutionPeriod==="Semana"?`${month}-S${String(row.semana).padStart(2,"0")}`:month;const item=map.get(key)||{key,atingidas:0,registros:0};item.registros+=1;if(row.bateuMeta)item.atingidas+=1;map.set(key,item)});
     return [...map.values()].sort((a,b)=>a.key.localeCompare(b.key)).map(item=>({...item,nome:goalEvolutionPeriod==="Semana"?`S${item.key.slice(-2)} · ${monthLabel(item.key.slice(0,7))}`:monthLabel(item.key),percentual:item.registros?Number((item.atingidas/item.registros*100).toFixed(1)):0}));
   },[filteredGoals,goalEvolutionPeriod]);
-  const overviewClients=useMemo(()=>clients.filter(client=>
-    (squad==="Todos"||client.squad===squad)&&
-    (status==="Todos"||(status==="Ativos"&&client.ativo)||(status==="Inativos"&&!client.ativo)||(status==="Sem contrato"&&client.ativo&&client.contratos===0))
-  ),[clients,squad,status]);
+  const eligibleOverviewServices=useMemo(()=>{
+    const ids=new Set(clients.filter(client=>squad==="Todos"||client.squad===squad).flatMap(client=>(client.serviceContracts||[]).flatMap(contract=>contract.serviceIds||[])).map(String));
+    return services.filter(service=>ids.has(String(service.id)));
+  },[clients,services,squad]);
+  const selectedOverviewServiceIds=useMemo(()=>new Set((overviewServiceSelections??eligibleOverviewServices.map(service=>service.id)).map(String)),[overviewServiceSelections,eligibleOverviewServices]);
+  const allOverviewServicesSelected=overviewServiceSelections==null||selectedOverviewServiceIds.size===eligibleOverviewServices.length;
+  const toggleOverviewService=id=>setOverviewServiceSelections(current=>{const next=new Set((current??eligibleOverviewServices.map(service=>service.id)).map(String));const key=String(id);if(next.has(key))next.delete(key);else next.add(key);return [...next]});
+  const setAllOverviewServices=selected=>setOverviewServiceSelections(selected?null:[]);
+  const overviewClients=useMemo(()=>clients.flatMap(client=>{
+    if(squad!=="Todos"&&client.squad!==squad)return [];
+    if((overviewClientEntryFrom||overviewClientEntryTo)&&(!client.entradaData||(overviewClientEntryFrom&&client.entradaData<overviewClientEntryFrom)||(overviewClientEntryTo&&client.entradaData>overviewClientEntryTo)))return [];
+    if((overviewChurnFrom||overviewChurnTo)&&(!client.churnData||(overviewChurnFrom&&client.churnData<overviewChurnFrom)||(overviewChurnTo&&client.churnData>overviewChurnTo)))return [];
+    const contracts=client.serviceContracts||[];
+    const serviceContracts=allOverviewServicesSelected?contracts:contracts.filter(contract=>contract.serviceIds?.some(id=>selectedOverviewServiceIds.has(String(id))));
+    const selectedContracts=(overviewContractFrom||overviewContractTo)?serviceContracts.filter(contract=>contract.startDate&&(!overviewContractFrom||contract.startDate>=overviewContractFrom)&&(!overviewContractTo||contract.startDate<=overviewContractTo)):serviceContracts;
+    if(!allOverviewServicesSelected&&!selectedContracts.length)return [];
+    if((overviewContractFrom||overviewContractTo)&&!selectedContracts.length)return [];
+    const activeContracts=selectedContracts.filter(contract=>contract.active);
+    const datedContracts=selectedContracts.filter(contract=>contract.startDate).sort((a,b)=>a.startDate.localeCompare(b.startDate));
+    const serviceNames=[...new Set(selectedContracts.flatMap(contract=>contract.services||[]))].sort((a,b)=>a.localeCompare(b,"pt-BR"));
+    const scoped={...client,mrr:activeContracts.reduce((sum,contract)=>sum+contract.recurring,0),oneshot:activeContracts.reduce((sum,contract)=>sum+contract.oneShot,0),ltv:selectedContracts.reduce((sum,contract)=>sum+contract.ltv,0),contratos:activeContracts.length,dataInicio:datedContracts[0]?.startLabel||"—",dataInicioMes:datedContracts[0]?.startMonth||null,servicos:serviceNames,selectedServiceContracts:selectedContracts};
+    if(!(status==="Todos"||(status==="Ativos"&&scoped.ativo)||(status==="Inativos"&&!scoped.ativo)||(status==="Sem contrato"&&scoped.ativo&&scoped.contratos===0)))return [];
+    return [scoped];
+  }),[clients,squad,status,selectedOverviewServiceIds,allOverviewServicesSelected,overviewClientEntryFrom,overviewClientEntryTo,overviewContractFrom,overviewContractTo,overviewChurnFrom,overviewChurnTo]);
+  const filtered=useMemo(()=>overviewClients.filter(client=>`${client.nome} ${client.responsavel}`.toLowerCase().includes(search.toLowerCase())),[overviewClients,search]);
+  const pages=Math.max(1,Math.ceil(filtered.length/pageSize));
+  const pageRows=filtered.slice((Math.min(page,pages)-1)*pageSize,Math.min(page,pages)*pageSize);
+  const chooseSquad=name=>{setSquad(squad===name?"Todos":name);setOverviewServiceSelections(null);setPage(1);document.getElementById("carteira")?.scrollIntoView({behavior:"smooth"});};
+  const csv=()=>{
+    const cols=["Cliente","Squad","Responsável","Status","Serviços","GMV","MRR","Oneshot","LTV aproximado","Contratos","Segmento ID","Origem ID","Entrada Cliente","Data Início"];
+    const rows=filtered.map(c=>[c.nome,c.squad,c.responsavel,c.ativo?"Ativo":"Churn",c.servicos.join(", "),c.gmv,c.mrr,c.oneshot,c.ltv,c.contratos,c.segmento,c.origem,c.entrada,c.dataInicio]);
+    const blob=new Blob(["\ufeff"+[cols,...rows].map(r=>r.map(v=>`"${String(v??"").replaceAll('"','""')}"`).join(";")).join("\n")],{type:"text/csv;charset=utf-8"});
+    const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="tfhub-clientes-filtrados.csv";a.click();URL.revokeObjectURL(a.href);
+  };
   const overviewSquads=useMemo(()=>{
     const grouped=new Map();
     overviewClients.forEach(client=>{
@@ -290,12 +310,23 @@ export default function Dashboard(){
   const overviewMonthly=useMemo(()=>{
     const map=new Map(monthly.map(item=>[item.mes,{...item,entradas:0,churns:0}]));
     overviewClients.forEach(client=>{
-      if(client.entradaMes){if(!map.has(client.entradaMes))map.set(client.entradaMes,{mes:client.entradaMes,entradas:0,churns:0,contratos:0,mrr:0});map.get(client.entradaMes).entradas+=1}
+      if(client.dataInicioMes){if(!map.has(client.dataInicioMes))map.set(client.dataInicioMes,{mes:client.dataInicioMes,entradas:0,churns:0,contratos:0,mrr:0});map.get(client.dataInicioMes).entradas+=1}
       if(client.churnMes){if(!map.has(client.churnMes))map.set(client.churnMes,{mes:client.churnMes,entradas:0,churns:0,contratos:0,mrr:0});map.get(client.churnMes).churns+=1}
     });
-    return [...map.values()].sort((a,b)=>a.mes.localeCompare(b.mes));
+    const currentMonth=new Date().toISOString().slice(0,7);
+    return [...map.values()].filter(item=>item.mes<=currentMonth).sort((a,b)=>a.mes.localeCompare(b.mes));
   },[monthly,overviewClients]);
   const periodData=overviewMonthly.slice(-period);
+  const overviewRevenueMonthly=useMemo(()=>{
+    const map=new Map(monthly.map(item=>[item.mes,{mes:item.mes,ganha:0,perdida:0}]));
+    overviewClients.forEach(client=>(client.selectedServiceContracts||[]).forEach(contract=>{
+      if(contract.startMonth){if(!map.has(contract.startMonth))map.set(contract.startMonth,{mes:contract.startMonth,ganha:0,perdida:0});map.get(contract.startMonth).ganha+=contract.recurring||0}
+      if(contract.endMonth){if(!map.has(contract.endMonth))map.set(contract.endMonth,{mes:contract.endMonth,ganha:0,perdida:0});map.get(contract.endMonth).perdida+=contract.recurring||0}
+    }));
+    const currentMonth=new Date().toISOString().slice(0,7);
+    return [...map.values()].filter(item=>item.mes<=currentMonth).sort((a,b)=>a.mes.localeCompare(b.mes));
+  },[monthly,overviewClients]);
+  const revenuePeriodData=overviewRevenueMonthly.slice(-period);
   const activeClients=overviewClients.filter(c=>c.ativo);
   const churnedClients=overviewClients.length-activeClients.length;
   const totalMrr=overviewClients.reduce((sum,c)=>sum+c.mrr,0);
@@ -355,19 +386,28 @@ export default function Dashboard(){
         <button className={tab==="remuneracoes"?"active":""} onClick={()=>{setTab("remuneracoes");loadRemuneracoes()}}><WalletCards/>Remunerações</button>
         <button className={tab==="economics"?"active":""} onClick={()=>setTab("economics")}><Landmark/>Economics</button>
       </nav>
-      <div className="security"><ShieldCheck/><div><b>Conexão protegida</b><small>Sem PII ou credenciais</small></div></div>
+      <div className="sidebar-footer"><button type="button" className="sync-dashboard" onClick={loadDashboard} disabled={refreshing} title={refreshing?"Sincronizando dados":"Sincronizar com o banco"} aria-label={refreshing?"Sincronizando dados":"Sincronizar dashboard com o banco"}><RefreshCw className={refreshing?"spinning":""}/><span>{refreshing?"Sincronizando…":"Sincronizar dados"}</span></button><div className="security"><ShieldCheck/><div><b>Conexão protegida</b><small>Sem PII ou credenciais</small></div></div></div>
     </aside>
     <section className="content">
       <header>
         <div><p>PERFORMANCE & OPERAÇÕES</p><h1>{tab==="visao"?"Visão consolidada":tab==="capacity"?"Capacity dos investidores":tab==="squads"?"Clientes por squad":tab==="jornada"?"Jornada do cliente":tab==="metas"?"Resultados vs. metas":tab==="remuneracoes"?"Remuneração dos investidores":tab==="economics"?"Economics":"Clientes por responsável e função"}</h1></div>
         <div className="header-actions"><div className="snapshot"><i/>{refreshing?"Atualizando…":`Atualizado • ${snapshotLabel}`}</div><div className="avatar">TF</div></div>
       </header>
-      <div className="snapshot-note"><ShieldCheck size={16}/><b>Dados dinâmicos:</b> esta tela consulta automaticamente a nova base ao abrir e atualiza a cada minuto.</div>
+      <div className="snapshot-note"><ShieldCheck size={16}/><b>Dados sincronizados:</b> use o botão no rodapé do menu lateral para buscar as informações mais recentes.</div>
       {dataError&&<div className="snapshot-note error-note"><AlertTriangle size={16}/><b>Falha de atualização:</b> {dataError}</div>}
       <div className="toolbar">
         {tab==="visao"&&<div className="period"><span>Período dos gráficos</span>{[6,12,24].map(n=><button key={n} onClick={()=>setPeriod(n)} className={period===n?"selected":""}>{n} meses</button>)}</div>}
         <div className="overview-filters top-screen-filters">
-          {tab==="visao"&&<><label className="filter-field"><span>Squad</span><select aria-label="Filtrar Visão Geral por squad" value={squad} onChange={event=>{setSquad(event.target.value);setPage(1)}}><option>Todos</option>{squadRows.map(item=><option key={item.id}>{item.nome}</option>)}</select></label><label className="filter-field"><span>Status do cliente</span><select aria-label="Filtrar Visão Geral por status do cliente" value={status} onChange={event=>{setStatus(event.target.value);setPage(1)}}><option value="Todos">Todos os clientes</option><option value="Ativos">Clientes ativos</option><option value="Inativos">Clientes inativos</option><option value="Sem contrato">Sem contrato ativo</option></select></label></>}
+          {tab==="visao"&&<>
+            <label className="filter-field"><span>Squad</span><select aria-label="Filtrar Visão Geral por squad" value={squad} onChange={event=>{setSquad(event.target.value);setOverviewServiceSelections(null);setOverviewServicePickerOpen(false);setPage(1)}}><option>Todos</option>{squadRows.map(item=><option key={item.id}>{item.nome}</option>)}</select></label>
+            <div className="investor-multiselect service-multiselect"><span>Serviços</span><button type="button" className="investor-multiselect-trigger" aria-label="Filtrar Visão Geral por serviços" onClick={()=>setOverviewServicePickerOpen(value=>!value)}><BriefcaseBusiness size={14}/><b>{allOverviewServicesSelected?`Todos (${eligibleOverviewServices.length})`:`${selectedOverviewServiceIds.size} de ${eligibleOverviewServices.length}`}</b>{overviewServicePickerOpen?<ChevronUp size={14}/>:<ChevronDown size={14}/>}</button>{overviewServicePickerOpen&&<div className="investor-multiselect-menu"><div className="investor-multiselect-actions"><button onClick={()=>setAllOverviewServices(true)}><Check size={13}/>Selecionar todos</button><button onClick={()=>setAllOverviewServices(false)}><X size={13}/>Limpar</button></div><div className="investor-multiselect-list">{eligibleOverviewServices.map(service=><label key={service.id}><input type="checkbox" checked={selectedOverviewServiceIds.has(String(service.id))} onChange={()=>toggleOverviewService(service.id)}/><span><b>{service.nome}</b></span></label>)}</div>{!eligibleOverviewServices.length&&<div className="investor-multiselect-empty">Nenhum serviço encontrado neste squad.</div>}</div>}</div>
+            <label className="filter-field"><span>Status do cliente</span><select aria-label="Filtrar Visão Geral por status do cliente" value={status} onChange={event=>{setStatus(event.target.value);setPage(1)}}><option value="Todos">Todos os clientes</option><option value="Ativos">Clientes ativos</option><option value="Inativos">Clientes inativos</option><option value="Sem contrato">Sem contrato ativo</option></select></label>
+            <div className="overview-date-filters"><div className="overview-date-heading"><CalendarDays size={14}/><span>Períodos do recorte</span>{(overviewClientEntryFrom||overviewClientEntryTo||overviewContractFrom||overviewContractTo||overviewChurnFrom||overviewChurnTo)&&<button type="button" onClick={()=>{setOverviewClientEntryFrom("");setOverviewClientEntryTo("");setOverviewContractFrom("");setOverviewContractTo("");setOverviewChurnFrom("");setOverviewChurnTo("");setPage(1)}}><X size={12}/>Limpar períodos</button>}</div><div className="overview-date-fields">
+              <div className="date-range"><strong>Entrada cliente</strong><label><span>De</span><input type="date" aria-label="Entrada do cliente a partir de" value={overviewClientEntryFrom} max={overviewClientEntryTo||undefined} onChange={event=>{setOverviewClientEntryFrom(event.target.value);setPage(1)}}/></label><label><span>Até</span><input type="date" aria-label="Entrada do cliente até" value={overviewClientEntryTo} min={overviewClientEntryFrom||undefined} onChange={event=>{setOverviewClientEntryTo(event.target.value);setPage(1)}}/></label></div>
+              <div className="date-range"><strong>Início contrato</strong><label><span>De</span><input type="date" aria-label="Início do contrato a partir de" value={overviewContractFrom} max={overviewContractTo||undefined} onChange={event=>{setOverviewContractFrom(event.target.value);setPage(1)}}/></label><label><span>Até</span><input type="date" aria-label="Início do contrato até" value={overviewContractTo} min={overviewContractFrom||undefined} onChange={event=>{setOverviewContractTo(event.target.value);setPage(1)}}/></label></div>
+              <div className="date-range"><strong>Churn</strong><label><span>De</span><input type="date" aria-label="Churn a partir de" value={overviewChurnFrom} max={overviewChurnTo||undefined} onChange={event=>{setOverviewChurnFrom(event.target.value);setPage(1)}}/></label><label><span>Até</span><input type="date" aria-label="Churn até" value={overviewChurnTo} min={overviewChurnFrom||undefined} onChange={event=>{setOverviewChurnTo(event.target.value);setPage(1)}}/></label></div>
+            </div></div>
+          </>}
           {tab==="equipe"&&<label className="filter-field"><span>Squad</span><select aria-label="Filtrar Clientes por Função por squad" value={teamSquad} onChange={event=>setTeamSquad(event.target.value)}><option>Todos</option>{teamSquads.map(name=><option key={name}>{name}</option>)}</select></label>}
           {tab==="capacity"&&<label className="filter-field"><span>Squad</span><select aria-label="Filtrar Capacity por squad" value={capacitySquad} onChange={event=>{setCapacitySquad(event.target.value);setCapacityInvestor("Todos")}}><option>Todos</option>{capacitySquads.map(name=><option key={name}>{name}</option>)}</select></label>}
           {tab==="squads"&&<label className="filter-field"><span>Squad</span><select aria-label="Filtrar Clientes por Squad" value={squadDetail} onChange={event=>{setSquadDetail(event.target.value);setSquadPage(1)}}><option>Todos</option>{squadRows.map(item=><option key={item.id}>{item.nome}</option>)}</select></label>}
@@ -387,10 +427,16 @@ export default function Dashboard(){
         <section className="grid two">
           <article className="panel wide"><div className="panel-title"><div><small>MOVIMENTO DA CARTEIRA</small><h2>Entradas vs. churn</h2></div><span>{period} meses</span></div>
             <div className="legend"><i className="green"/>Entradas <i className="red"/>Churn</div>
-            <ResponsiveContainer width="100%" height={285}><AreaChart data={periodData}><defs><linearGradient id="greenFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#52d681" stopOpacity=".28"/><stop offset="1" stopColor="#52d681" stopOpacity="0"/></linearGradient><linearGradient id="redFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor={RED} stopOpacity=".3"/><stop offset="1" stopColor={RED} stopOpacity="0"/></linearGradient></defs><CartesianGrid stroke="#24272e" vertical={false}/><XAxis dataKey="mes" tickFormatter={monthLabel} tick={{fill:"#7f8591",fontSize:11}} axisLine={false} tickLine={false}/><YAxis tick={{fill:"#7f8591",fontSize:11}} axisLine={false} tickLine={false}/><Tooltip {...chartTip} labelFormatter={monthLabel}/><Area type="monotone" dataKey="entradas" stroke="#52d681" fill="url(#greenFill)" strokeWidth={2}/><Area type="monotone" dataKey="churns" stroke={RED} fill="url(#redFill)" strokeWidth={2}/></AreaChart></ResponsiveContainer>
+            <ResponsiveContainer width="100%" height={285}><AreaChart data={periodData} margin={{top:18,right:12,left:0,bottom:0}}><defs><linearGradient id="greenFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#52d681" stopOpacity=".28"/><stop offset="1" stopColor="#52d681" stopOpacity="0"/></linearGradient><linearGradient id="redFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor={RED} stopOpacity=".3"/><stop offset="1" stopColor={RED} stopOpacity="0"/></linearGradient></defs><CartesianGrid stroke="#24272e" vertical={false}/><XAxis dataKey="mes" tickFormatter={monthLabel} tick={{fill:"#7f8591",fontSize:11}} axisLine={false} tickLine={false}/><YAxis tick={{fill:"#7f8591",fontSize:11}} axisLine={false} tickLine={false}/><Tooltip {...chartTip} labelFormatter={monthLabel}/><Area type="monotone" dataKey="entradas" stroke="#52d681" fill="url(#greenFill)" strokeWidth={2} dot={{r:3,fill:"#15171c",stroke:"#52d681",strokeWidth:2}} activeDot={{r:5}}><LabelList dataKey="entradas" position="top" offset={8} fill="#9cccad" fontSize={10} fontWeight={600} formatter={value=>value||""}/></Area><Area type="monotone" dataKey="churns" stroke={RED} fill="url(#redFill)" strokeWidth={2} dot={{r:3,fill:"#15171c",stroke:RED,strokeWidth:2}} activeDot={{r:5}}><LabelList dataKey="churns" position="bottom" offset={8} fill="#d9909a" fontSize={10} fontWeight={600} formatter={value=>value||""}/></Area></AreaChart></ResponsiveContainer>
           </article>
           <article className="panel"><div className="panel-title"><div><small>AÇÃO RECOMENDADA</small><h2>Leituras prioritárias</h2></div></div>
             <div className="insights"><div className="insight hot"><AlertTriangle/><p><b>{withoutContract.length} clientes ativos sem contrato ativo</b><span>{withoutContract.slice(0,3).map(c=>c.nome).join(", ")||"Nenhuma inconsistência encontrada"}.</span></p></div><div className="insight"><ArrowUpRight/><p><b>Squad com menor churn</b><span>{[...overviewSquads].filter(s=>s.ativos+s.churned>5).sort((a,b)=>a.churn-b.churn)[0]?.nome||"—"} entre carteiras relevantes.</span></p></div><div className="insight"><TrendingUp/><p><b>Dados atuais do TFHub</b><span>Indicadores recalculados para os filtros selecionados.</span></p></div></div>
+          </article>
+        </section>
+        <section className="grid">
+          <article className="panel wide"><div className="panel-title"><div><small>MOVIMENTO DA RECEITA</small><h2>Receita ganha vs. receita perdida</h2></div><span>MRR · {period} meses</span></div>
+            <div className="legend"><i className="green"/>Receita ganha <i className="red"/>Receita perdida</div>
+            <ResponsiveContainer width="100%" height={300}><AreaChart data={revenuePeriodData} margin={{top:20,right:18,left:8,bottom:0}}><defs><linearGradient id="revenueWonFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#52d681" stopOpacity=".28"/><stop offset="1" stopColor="#52d681" stopOpacity="0"/></linearGradient><linearGradient id="revenueLostFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor={RED} stopOpacity=".3"/><stop offset="1" stopColor={RED} stopOpacity="0"/></linearGradient></defs><CartesianGrid stroke="#24272e" vertical={false}/><XAxis dataKey="mes" tickFormatter={monthLabel} tick={{fill:"#7f8591",fontSize:11}} axisLine={false} tickLine={false}/><YAxis tickFormatter={compact} tick={{fill:"#7f8591",fontSize:11}} axisLine={false} tickLine={false}/><Tooltip {...chartTip} labelFormatter={monthLabel} formatter={(value,name)=>[money(value),name]}/><Area type="monotone" dataKey="ganha" name="Receita ganha" stroke="#52d681" fill="url(#revenueWonFill)" strokeWidth={2} dot={{r:3,fill:"#15171c",stroke:"#52d681",strokeWidth:2}} activeDot={{r:5}}><LabelList dataKey="ganha" position="top" offset={8} fill="#9cccad" fontSize={10} fontWeight={600} formatter={value=>value?compact(value):""}/></Area><Area type="monotone" dataKey="perdida" name="Receita perdida" stroke={RED} fill="url(#revenueLostFill)" strokeWidth={2} dot={{r:3,fill:"#15171c",stroke:RED,strokeWidth:2}} activeDot={{r:5}}><LabelList dataKey="perdida" position="bottom" offset={8} fill="#d9909a" fontSize={10} fontWeight={600} formatter={value=>value?compact(value):""}/></Area></AreaChart></ResponsiveContainer>
           </article>
         </section>
         <section className="grid two">
@@ -565,7 +611,7 @@ export default function Dashboard(){
       {tab==="visao"&&<article className="panel table-panel" id="carteira">
         <div className="table-title"><div><small>CLIENTES × CONTRATOS</small><h2>Carteira consolidada</h2></div><button className="export" onClick={csv}><Download size={16}/>Exportar CSV</button></div>
         <div className="filters"><label className="filter-field search-field"><span>Buscar</span><div className="filter-input"><Search size={16}/><input value={search} onChange={e=>{setSearch(e.target.value);setPage(1)}} placeholder="Cliente ou responsável..."/></div></label>{search&&<button className="clear" onClick={()=>{setSearch("");setPage(1)}}><X size={14}/>Limpar busca</button>}</div>
-        <div className="table-wrap"><table><thead><tr><th>Cliente</th><th>Status</th><th>Squad / responsável</th><th>MRR</th><th>Oneshot</th><th>LTV aprox.</th><th>Contratos</th><th>Entrada</th><th>Data de churn</th></tr></thead><tbody>{pageRows.map(c=><tr key={c.id} className={c.ativo&&c.contratos===0?"flagged":""}><td><b>{c.nome}</b><small>Segmento {c.segmento??"—"} · Origem {c.origem??"—"}</small></td><td><span className={`badge ${c.ativo?"on":"off"}`}>{c.ativo?"Ativo":"Churn"}</span>{c.ativo&&c.contratos===0&&<span className="warning-tag">Sem contrato</span>}</td><td><b>{c.squad}</b><small>{c.responsavel}</small></td><td>{money(c.mrr)}</td><td>{money(c.oneshot)}</td><td>{money(c.ltv)}</td><td>{c.contratos}</td><td>{c.entrada}</td><td>{c.churn||"—"}</td></tr>)}</tbody></table></div>
+        <div className="table-wrap"><table><thead><tr><th>Cliente</th><th>Status</th><th>Squad / responsável</th><th>Serviços</th><th>MRR</th><th>Oneshot</th><th>LTV aprox.</th><th>Contratos</th><th>Entrada Cliente</th><th>Data Início</th><th>Data de churn</th></tr></thead><tbody>{pageRows.map(c=><tr key={c.id} className={c.ativo&&c.contratos===0?"flagged":""}><td><b>{c.nome}</b><small>Segmento {c.segmento??"—"} · Origem {c.origem??"—"}</small></td><td><span className={`badge ${c.ativo?"on":"off"}`}>{c.ativo?"Ativo":"Churn"}</span>{c.ativo&&c.contratos===0&&<span className="warning-tag">Sem contrato</span>}</td><td><b>{c.squad}</b><small>{c.responsavel}</small></td><td>{c.servicos.length?c.servicos.join(", "):"—"}</td><td>{money(c.mrr)}</td><td>{money(c.oneshot)}</td><td>{money(c.ltv)}</td><td>{c.contratos}</td><td>{c.entrada}</td><td>{c.dataInicio}</td><td>{c.churn||"—"}</td></tr>)}</tbody></table></div>
         <div className="pagination"><span>Exibindo {pageRows.length} de {filtered.length} registros filtrados</span><div><button disabled={page<=1} onClick={()=>setPage(p=>p-1)}><ChevronLeft/></button><b>{Math.min(page,pages)} / {pages}</b><button disabled={page>=pages} onClick={()=>setPage(p=>p+1)}><ChevronRight/></button></div></div>
       </article>}
       <footer><span>TF Hub • Gestão de carteira</span><span><Filter size={13}/> Segmentos resolvidos por nome; origens continuam por ID.</span></footer>
