@@ -1,4 +1,5 @@
 import { getEconomicsYearData } from "../../../../worker/economics-data";
+import { databaseEnv } from "../../../../worker/database";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -18,15 +19,13 @@ export async function GET(request: Request) {
   if (!authorized(request)) return json({ error: process.env.REMUNERACAO_ADMIN_TOKEN ? "Acesso administrativo inválido" : "Configure REMUNERACAO_ADMIN_TOKEN para liberar o Economics fora do ambiente local" }, process.env.REMUNERACAO_ADMIN_TOKEN ? 401 : 503);
   const year = Number(new URL(request.url).searchParams.get("year"));
   if (!Number.isInteger(year) || year < 2000 || year > 2100) return json({ error: "Ano inválido" }, 400);
-  const url = process.env.TFHUB_SUPABASE_URL;
-  const key = process.env.TFHUB_SUPABASE_SECRET_KEY;
-  if (!url || !key) return json({ error: "Integração não configurada" }, 503);
+  const env = databaseEnv();
+  if (!env) return json({ error: "Integração não configurada" }, 503);
   try {
-    const months = await getEconomicsYearData({ TFHUB_SUPABASE_URL: url, TFHUB_SUPABASE_SECRET_KEY: key }, year);
+    const months = await getEconomicsYearData(env, year);
     return json({ year, months });
   } catch (error) {
     console.error("Economics evolution query failed", error);
     return json({ error: "Não foi possível calcular a evolução mensal do Economics" }, 502);
   }
 }
-

@@ -1,3 +1,5 @@
+import { databaseEnv, queryRows, type DatabaseEnv } from "../../../worker/database";
+
 export const dynamic = "force-dynamic";
 
 type RemuneracaoInput = {
@@ -26,22 +28,16 @@ function isAuthorized(request: Request) {
   return request.headers.get("x-remuneracao-admin-token") === configuredToken;
 }
 
-function supabaseConfig() {
-  const url = process.env.TFHUB_SUPABASE_URL;
-  const key = process.env.TFHUB_SUPABASE_SECRET_KEY;
-  return url && key ? { url, key } : null;
-}
-
 async function supabaseRequest(
-  config: { url: string; key: string },
+  config: DatabaseEnv,
   path: string,
   init: RequestInit = {},
 ) {
-  const response = await fetch(new URL(path, config.url), {
+  const response = await fetch(new URL(path, config.TFHUB_SUPABASE_URL), {
     ...init,
     headers: {
-      apikey: config.key,
-      Authorization: `Bearer ${config.key}`,
+      apikey: config.TFHUB_SUPABASE_SECRET_KEY!,
+      Authorization: `Bearer ${config.TFHUB_SUPABASE_SECRET_KEY}`,
       "Content-Type": "application/json",
       Prefer: "return=representation",
       ...init.headers,
@@ -88,13 +84,12 @@ function parseInput(input: RemuneracaoInput) {
 }
 
 async function inputWithInvestorName(
-  config: { url: string; key: string },
+  config: DatabaseEnv,
   input: ReturnType<typeof parseInput>,
 ) {
-  const investors = (await supabaseRequest(
-    config,
-    `/rest/v1/investidores?select=nome&investidor_id=eq.${input.investidor_id}&limit=1`,
-  )) as Array<{ nome?: unknown }>;
+  const investors = config.PG_HOST
+    ? await queryRows(config, `select nome from "${config.PG_SCHEMA || "public"}"."investidores" where investidor_id = $1 limit 1`, [input.investidor_id])
+    : (await supabaseRequest(config, `/rest/v1/investidores?select=nome&investidor_id=eq.${input.investidor_id}&limit=1`)) as Array<{ nome?: unknown }>;
   const investorName = String(investors[0]?.nome ?? "").trim();
   if (!investorName) throw new Error("Investidor não encontrado no banco de dados");
   return { ...input, investidor_nome: investorName };
@@ -115,20 +110,19 @@ function requireAccess(request: Request) {
 export async function GET(request: Request) {
   const denied = requireAccess(request);
   if (denied) return denied;
-  const config = supabaseConfig();
+  const config = databaseEnv();
   if (!config) return json({ error: "Integração não configurada" }, 503);
 
   try {
-    const [investidores, remuneracoes] = await Promise.all([
-      supabaseRequest(
-        config,
-        "/rest/v1/investidores?select=investidor_id,nome,ativo&order=nome.asc",
-      ),
-      supabaseRequest(
-        config,
-        "/rest/v1/investidor_remuneracao?select=id,investidor_id,investidor_nome,remuneracao,data_inicio_vigencia,data_fim_vigencia,created_at,updated_at&order=data_inicio_vigencia.desc",
-      ),
-    ]);
+    const [investidores, remuneracoes] = config.PG_HOST
+      ? await Promise.all([
+          queryRows(config, `select investidor_id,nome,ativo from "${config.PG_SCHEMA || "public"}"."investidores" order by nome asc`),
+          queryRows(config, `select id,investidor_id,investidor_nome,remuneracao,data_inicio_vigencia,data_fim_vigencia,created_at,updated_at from "${config.PG_SCHEMA || "public"}"."investidor_remuneracao" order by data_inicio_vigencia desc`),
+        ])
+      : await Promise.all([
+          supabaseRequest(config, "/rest/v1/investidores?select=investidor_id,nome,ativo&order=nome.asc"),
+          supabaseRequest(config, "/rest/v1/investidor_remuneracao?select=id,investidor_id,investidor_nome,remuneracao,data_inicio_vigencia,data_fim_vigencia,created_at,updated_at&order=data_inicio_vigencia.desc"),
+        ]);
     return json({ investidores, remuneracoes });
   } catch {
     return json({ error: "Não foi possível consultar as remunerações" }, 502);
@@ -138,16 +132,15 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const denied = requireAccess(request);
   if (denied) return denied;
-  const config = supabaseConfig();
+  const config = databaseEnv();
   if (!config) return json({ error: "Integração não configurada" }, 503);
 
   try {
     const input = parseInput((await request.json()) as RemuneracaoInput);
     const payload = await inputWithInvestorName(config, input);
-    const rows = await supabaseRequest(config, "/rest/v1/investidor_remuneracao", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
+    const rows = config.PG_HOST
+      ? await queryRows(config, `insert into "${config.PG_SCHEMA || "public"}"."investidor_remuneracao" (investidor_id,investidor_nome,remuneracao,data_inicio_vigencia,data_fim_vigencia) values ($1,$2,$3,$4,$5) returning *`, [payload.investidor_id, payload.investidor_nome, payload.remuneracao, payload.data_inicio_vigencia, payload.data_fim_vigencia])
+      : await supabaseRequest(config, "/rest/v1/investidor_remuneracao", { method: "POST", body: JSON.stringify(payload) });
     return json({ remuneracao: rows[0] }, 201);
   } catch (error) {
     return json(
@@ -160,7 +153,7 @@ export async function POST(request: Request) {
 export async function PATCH(request: Request) {
   const denied = requireAccess(request);
   if (denied) return denied;
-  const config = supabaseConfig();
+  const config = databaseEnv();
   if (!config) return json({ error: "Integração não configurada" }, 503);
   const id = Number(new URL(request.url).searchParams.get("id"));
   if (!Number.isInteger(id) || id <= 0) return json({ error: "Registro inválido" }, 400);
@@ -168,11 +161,9 @@ export async function PATCH(request: Request) {
   try {
     const input = parseInput((await request.json()) as RemuneracaoInput);
     const payload = await inputWithInvestorName(config, input);
-    const rows = await supabaseRequest(
-      config,
-      `/rest/v1/investidor_remuneracao?id=eq.${id}`,
-      { method: "PATCH", body: JSON.stringify(payload) },
-    );
+    const rows = config.PG_HOST
+      ? await queryRows(config, `update "${config.PG_SCHEMA || "public"}"."investidor_remuneracao" set investidor_id=$1,investidor_nome=$2,remuneracao=$3,data_inicio_vigencia=$4,data_fim_vigencia=$5,updated_at=now() where id=$6 returning *`, [payload.investidor_id, payload.investidor_nome, payload.remuneracao, payload.data_inicio_vigencia, payload.data_fim_vigencia, id])
+      : await supabaseRequest(config, `/rest/v1/investidor_remuneracao?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(payload) });
     if (!rows.length) return json({ error: "Registro não encontrado" }, 404);
     return json({ remuneracao: rows[0] });
   } catch (error) {
@@ -186,17 +177,15 @@ export async function PATCH(request: Request) {
 export async function DELETE(request: Request) {
   const denied = requireAccess(request);
   if (denied) return denied;
-  const config = supabaseConfig();
+  const config = databaseEnv();
   if (!config) return json({ error: "Integração não configurada" }, 503);
   const id = Number(new URL(request.url).searchParams.get("id"));
   if (!Number.isInteger(id) || id <= 0) return json({ error: "Registro inválido" }, 400);
 
   try {
-    const rows = await supabaseRequest(
-      config,
-      `/rest/v1/investidor_remuneracao?id=eq.${id}`,
-      { method: "DELETE" },
-    );
+    const rows = config.PG_HOST
+      ? await queryRows(config, `delete from "${config.PG_SCHEMA || "public"}"."investidor_remuneracao" where id=$1 returning id`, [id])
+      : await supabaseRequest(config, `/rest/v1/investidor_remuneracao?id=eq.${id}`, { method: "DELETE" });
     if (!rows.length) return json({ error: "Registro não encontrado" }, 404);
     return json({ deleted: true });
   } catch {

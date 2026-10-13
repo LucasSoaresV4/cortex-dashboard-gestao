@@ -2,11 +2,19 @@
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
 import { getDashboardData } from "./dashboard-data";
+import { releaseDatabase } from "./database";
 
 interface Env {
   ASSETS: Fetcher;
-  TFHUB_SUPABASE_URL: string;
-  TFHUB_SUPABASE_SECRET_KEY: string;
+  TFHUB_SUPABASE_URL?: string;
+  TFHUB_SUPABASE_SECRET_KEY?: string;
+  PG_HOST?: string;
+  PG_PORT?: string;
+  PG_DB?: string;
+  PG_USER?: string;
+  PG_PASSWORD?: string;
+  PG_SCHEMA?: string;
+  PG_SSLMODE?: string;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
@@ -35,17 +43,17 @@ const worker = {
       if (request.method !== "GET") {
         return Response.json({ error: "Método não permitido" }, { status: 405 });
       }
-      if (
-        !env.TFHUB_SUPABASE_URL ||
-        !env.TFHUB_SUPABASE_SECRET_KEY
-      ) {
+      const hasPostgres = env.PG_HOST && env.PG_DB && env.PG_USER && env.PG_PASSWORD;
+      const hasSupabase = env.TFHUB_SUPABASE_URL && env.TFHUB_SUPABASE_SECRET_KEY;
+      if (!hasPostgres && !hasSupabase) {
         return Response.json({ error: "Integração não configurada" }, { status: 503 });
       }
+      const requestEnv = hasPostgres ? { ...env, PG_REQUEST_ID: crypto.randomUUID() } : env;
       try {
         const data = await Promise.race([
-          getDashboardData(env),
+          getDashboardData(requestEnv),
           new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error("Database query timed out")), 14000),
+            setTimeout(() => reject(new Error("Database query timed out")), 25000),
           ),
         ]);
         return Response.json(data, {
@@ -66,6 +74,8 @@ const worker = {
             },
           },
         );
+      } finally {
+        await releaseDatabase(requestEnv);
       }
     }
 

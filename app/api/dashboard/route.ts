@@ -1,13 +1,12 @@
 import { getDashboardData } from "../../../worker/dashboard-data";
+import { databaseEnv } from "../../../worker/database";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
 export async function GET() {
-  const TFHUB_SUPABASE_URL = process.env.TFHUB_SUPABASE_URL;
-  const TFHUB_SUPABASE_SECRET_KEY = process.env.TFHUB_SUPABASE_SECRET_KEY;
-
-  if (!TFHUB_SUPABASE_URL || !TFHUB_SUPABASE_SECRET_KEY) {
+  const env = databaseEnv();
+  if (!env) {
     return Response.json(
       { error: "Integração não configurada" },
       { status: 503 },
@@ -16,7 +15,7 @@ export async function GET() {
 
   try {
     const data = await Promise.race([
-      getDashboardData({ TFHUB_SUPABASE_URL, TFHUB_SUPABASE_SECRET_KEY }),
+      getDashboardData(env),
       new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error("Database query timed out")), 25000),
       ),

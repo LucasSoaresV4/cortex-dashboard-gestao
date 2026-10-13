@@ -1,4 +1,4 @@
-type DatabaseEnv = { TFHUB_SUPABASE_URL: string; TFHUB_SUPABASE_SECRET_KEY: string };
+import { fetchTable, type DatabaseEnv } from "./database";
 type Row = Record<string, unknown>;
 
 export type EconomicsConfig = {
@@ -24,22 +24,6 @@ export const DEFAULT_ECONOMICS_CONFIG: EconomicsConfig = {
   meta_mc: 0.5,
   meta_nrr: 1,
 };
-
-async function fetchTable(env: DatabaseEnv, table: string, columns: string, optional = false) {
-  const rows: Row[] = [];
-  for (let offset = 0; ; offset += 1000) {
-    const url = new URL(`/rest/v1/${table}`, env.TFHUB_SUPABASE_URL);
-    url.searchParams.set("select", columns);
-    const response = await fetch(url, { headers: { apikey: env.TFHUB_SUPABASE_SECRET_KEY, Authorization: `Bearer ${env.TFHUB_SUPABASE_SECRET_KEY}`, Range: `${offset}-${offset + 999}`, "Range-Unit": "items" } });
-    if (!response.ok) {
-      if (optional && response.status === 404) return [];
-      throw new Error(`Supabase REST ${table} failed with status ${response.status}`);
-    }
-    const page = await response.json() as Row[];
-    rows.push(...page);
-    if (page.length < 1000) return rows;
-  }
-}
 
 const number = (value: unknown) => Number.isFinite(Number(value)) ? Number(value) : 0;
 const date = (value: unknown) => value ? new Date(`${String(value).slice(0, 10)}T12:00:00Z`) : null;

@@ -1,45 +1,6 @@
-type DatabaseEnv = {
-  TFHUB_SUPABASE_URL: string;
-  TFHUB_SUPABASE_SECRET_KEY: string;
-};
+import { fetchTable, type DatabaseEnv } from "./database";
 
 type Row = Record<string, unknown>;
-
-async function fetchTable(
-  env: DatabaseEnv,
-  table: string,
-  columns: string,
-): Promise<Row[]> {
-  const pageSize = 1000;
-  const rows: Row[] = [];
-
-  for (let offset = 0; ; offset += pageSize) {
-    const url = new URL(
-      `/rest/v1/${encodeURIComponent(table)}`,
-      env.TFHUB_SUPABASE_URL,
-    );
-    url.searchParams.set("select", columns);
-
-    const response = await fetch(url, {
-      headers: {
-        apikey: env.TFHUB_SUPABASE_SECRET_KEY,
-        Authorization: `Bearer ${env.TFHUB_SUPABASE_SECRET_KEY}`,
-        Range: `${offset}-${offset + pageSize - 1}`,
-        "Range-Unit": "items",
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(
-        `Supabase REST ${table} failed with status ${response.status}`,
-      );
-    }
-
-    const page = (await response.json()) as Row[];
-    rows.push(...page);
-    if (page.length < pageSize) return rows;
-  }
-}
 
 function number(value: unknown) {
   const parsed = Number.parseFloat(String(value ?? "0"));

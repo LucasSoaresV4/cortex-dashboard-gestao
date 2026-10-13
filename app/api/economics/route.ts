@@ -1,4 +1,5 @@
 import { DEFAULT_ECONOMICS_CONFIG, getEconomicsData, type EconomicsConfig } from "../../../worker/economics-data";
+import { databaseEnv, queryRows } from "../../../worker/database";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -15,9 +16,7 @@ function authorized(request: Request) {
 }
 
 function config() {
-  const url = process.env.TFHUB_SUPABASE_URL;
-  const key = process.env.TFHUB_SUPABASE_SECRET_KEY;
-  return url && key ? { TFHUB_SUPABASE_URL: url, TFHUB_SUPABASE_SECRET_KEY: key } : null;
+  return databaseEnv();
 }
 
 function denied(request: Request) {
@@ -43,7 +42,15 @@ export async function PATCH(request: Request) {
     if (Object.values(values).some(value => !Number.isFinite(value) || value < 0)) return json({ error: "Todos os parâmetros devem ser números positivos" }, 400);
     if (values.imposto_percentual + values.royalties_percentual >= 100) return json({ error: "Impostos e royalties devem somar menos de 100%" }, 400);
     if (!(values.cluster_small_ate <= values.cluster_medium_ate && values.cluster_medium_ate <= values.cluster_large_ate)) return json({ error: "As faixas dos clusters precisam estar em ordem crescente" }, 400);
-    const response = await fetch(new URL("/rest/v1/economics_config?on_conflict=id", env.TFHUB_SUPABASE_URL), { method: "POST", headers: { apikey: env.TFHUB_SUPABASE_SECRET_KEY, Authorization: `Bearer ${env.TFHUB_SUPABASE_SECRET_KEY}`, "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=representation" }, body: JSON.stringify({ id: 1, ...values, updated_at: new Date().toISOString() }) });
+    if (env.PG_HOST) {
+      const keys = Object.keys(DEFAULT_ECONOMICS_CONFIG);
+      const parameters = keys.map(key => values[key]);
+      const assignments = keys.map((key, index) => `"${key}" = $${index + 1}`).join(", ");
+      const updates = keys.map(key => `"${key}" = excluded."${key}"`).join(", ");
+      const rows = await queryRows(env, `insert into "${env.PG_SCHEMA || "public"}"."economics_config" (id, ${keys.map(key => `"${key}"`).join(", ")}, updated_at) values (1, ${parameters.map((_, index) => `$${index + 1}`).join(", ")}, now()) on conflict (id) do update set ${updates}, updated_at = now() returning *`, parameters);
+      return json({ config: rows[0] });
+    }
+    const response = await fetch(new URL("/rest/v1/economics_config?on_conflict=id", env.TFHUB_SUPABASE_URL), { method: "POST", headers: { apikey: env.TFHUB_SUPABASE_SECRET_KEY!, Authorization: `Bearer ${env.TFHUB_SUPABASE_SECRET_KEY}`, "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=representation" }, body: JSON.stringify({ id: 1, ...values, updated_at: new Date().toISOString() }) });
     if (!response.ok) throw new Error(`Supabase config failed with ${response.status}`);
     return json({ config: (await response.json())[0] });
   } catch (error) { console.error("Economics config update failed", error); return json({ error: "Não foi possível salvar os parâmetros do Economics. Confirme se a migration foi aplicada." }, 502); }
